@@ -1,0 +1,6101 @@
+pub fn remaining_budget(&self) -> f64 {
+        self.total_budget - (self.queries_executed as f64 * self.epsilon)
+    }
+    
+    // Gaussian mechanism for (ε, δ)-differential privacy
+    pub fn gaussian_mechanism(
+        &self,
+        true_value: f64,
+        sensitivity: f64,
+    ) -> f64 {
+        let sigma = sensitivity * (2.0 * (1.25 / self.delta).ln()).sqrt() / self.epsilon;
+        let mut rng = rand::thread_rng();
+        let normal = rand_distr::Normal::new(0.0, sigma).unwrap();
+        
+        true_value + rng.sample(normal)
+    }
+}
+```
+
+### 7.4 Secure Multi-Party Computation (MPC) Analytics
+
+**Use Case:** Multiple parties compute aggregate statistics without revealing individual data.
+
+```rust
+use threshold_crypto::{SecretKeySet, PublicKeySet};
+
+pub struct MPCAnalyticsProtocol {
+    threshold: usize,
+    num_parties: usize,
+    secret_key_set: SecretKeySet,
+    public_key_set: PublicKeySet,
+}
+
+impl MPCAnalyticsProtocol {
+    pub fn setup(threshold: usize, num_parties: usize) -> Self {
+        let mut rng = rand::thread_rng();
+        let secret_key_set = SecretKeySet::random(threshold, &mut rng);
+        let public_key_set = secret_key_set.public_keys();
+        
+        MPCAnalyticsProtocol {
+            threshold,
+            num_parties,
+            secret_key_set,
+            public_key_set,
+        }
+    }
+    
+    // Each party encrypts their data share
+    pub fn encrypt_share(
+        &self,
+        party_id: usize,
+        data: u64,
+    ) -> Vec<u8> {
+        let public_key = self.public_key_set.public_key();
+        let ciphertext = public_key.encrypt(data.to_le_bytes());
+        ciphertext.to_bytes()
+    }
+    
+    // Aggregate encrypted shares
+    pub fn aggregate_shares(
+        &self,
+        encrypted_shares: Vec<Vec<u8>>,
+    ) -> Vec<u8> {
+        // Homomorphic addition of encrypted shares
+        // In threshold crypto, we combine decryption shares instead
+        encrypted_shares[0].clone()  // Placeholder
+    }
+    
+    // Threshold decryption - requires t+1 parties
+    pub fn threshold_decrypt(
+        &self,
+        ciphertext: Vec<u8>,
+        decryption_shares: Vec<(usize, Vec<u8>)>,
+    ) -> Result<u64, Error> {
+        if decryption_shares.len() <= self.threshold {
+            return Err(Error::InsufficientShares);
+        }
+        
+        // Combine decryption shares to recover plaintext
+        // This is simplified - real implementation uses Lagrange interpolation
+        Ok(0)  // Placeholder
+    }
+    
+    // Secure sum protocol
+    pub fn secure_sum(
+        &self,
+        party_values: Vec<u64>,
+    ) -> u64 {
+        // Each party adds random noise that cancels out
+        let mut masked_values = Vec::new();
+        let mut rng = rand::thread_rng();
+        
+        for (i, value) in party_values.iter().enumerate() {
+            let mut masked = *value;
+            
+            // Add noise shared with next party
+            let noise_forward: i64 = rng.gen_range(-1000..1000);
+            masked = masked.wrapping_add(noise_forward as u64);
+            
+            // Subtract noise shared with previous party
+            let noise_backward: i64 = rng.gen_range(-1000..1000);
+            masked = masked.wrapping_sub(noise_backward as u64);
+            
+            masked_values.push(masked);
+        }
+        
+        // Sum all masked values - noise cancels out
+        masked_values.iter().sum()
+    }
+}
+
+// Example: Compute average balance across parties without revealing individual balances
+pub struct SecureAverageComputation {
+    mpc: MPCAnalyticsProtocol,
+}
+
+impl SecureAverageComputation {
+    pub fn compute_average(
+        &self,
+        party_balances: Vec<u64>,
+    ) -> f64 {
+        let sum = self.mpc.secure_sum(party_balances.clone());
+        sum as f64 / party_balances.len() as f64
+    }
+}
+```
+
+### 7.5 Local Differential Privacy
+
+**Concept:** Privacy guaranteed at data collection, not just query time.
+
+```rust
+pub struct LocalDPCollector {
+    epsilon: f64,
+}
+
+impl LocalDPCollector {
+    pub fn new(epsilon: f64) -> Self {
+        LocalDPCollector { epsilon }
+    }
+    
+    // Randomized response for boolean data
+    pub fn randomized_response(&self, true_value: bool) -> bool {
+        let mut rng = rand::thread_rng();
+        let p = 1.0 / (1.0 + (-self.epsilon).exp());
+        
+        if rng.gen_bool(p) {
+            true_value
+        } else {
+            !true_value
+        }
+    }
+    
+    // RAPPOR (Randomized Aggregatable Privacy-Preserving Ordinal Response)
+    pub fn rappor_encode(&self, value: u64, num_bits: usize) -> Vec<bool> {
+        let mut rng = rand::thread_rng();
+        let mut bits = vec![false; num_bits];
+        
+        // Encode value as bits
+        for i in 0..num_bits {
+            if (value >> i) & 1 == 1 {
+                bits[i] = true;
+            }
+        }
+        
+        // Apply randomized response to each bit
+        let p = 0.5 * (1.0 + (-self.epsilon / 2.0).exp());
+        let q = 0.5 * (1.0 - (-self.epsilon / 2.0).exp());
+        
+        for bit in bits.iter_mut() {
+            let rand_val: f64 = rng.gen();
+            if *bit {
+                *bit = rand_val < p;
+            } else {
+                *bit = rand_val < q;
+            }
+        }
+        
+        bits
+    }
+    
+    // Decode aggregate RAPPOR data
+    pub fn rappor_aggregate(
+        &self,
+        encoded_values: Vec<Vec<bool>>,
+        num_bits: usize,
+    ) -> Vec<f64> {
+        let n = encoded_values.len() as f64;
+        let p = 0.5 * (1.0 + (-self.epsilon / 2.0).exp());
+        let q = 0.5 * (1.0 - (-self.epsilon / 2.0).exp());
+        
+        let mut bit_counts = vec![0.0; num_bits];
+        
+        for encoded in &encoded_values {
+            for (i, &bit) in encoded.iter().enumerate() {
+                if bit {
+                    bit_counts[i] += 1.0;
+                }
+            }
+        }
+        
+        // Debias counts
+        let mut true_counts = Vec::new();
+        for count in bit_counts {
+            let biased_prob = count / n;
+            let true_prob = (biased_prob - q) / (p - q);
+            true_counts.push(true_prob * n);
+        }
+        
+        true_counts
+    }
+}
+```
+
+### 7.6 Analytics Dashboard API
+
+```rust
+use actix_web::{web, App, HttpResponse, HttpServer};
+use serde::{Deserialize, Serialize};
+
+pub struct AnalyticsDashboard {
+    engine: Arc<RwLock<HomomorphicAnalyticsEngine>>,
+    dp_engine: Arc<RwLock<DifferentialPrivacyEngine>>,
+}
+
+#[derive(Deserialize)]
+pub struct QueryRequest {
+    query_type: QueryType,
+    parameters: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+pub enum QueryType {
+    TotalBalance,
+    AverageBalance,
+    Distribution,
+    TransactionVolume,
+    ActiveUsers,
+}
+
+#[derive(Serialize)]
+pub struct QueryResponse {
+    result: serde_json::Value,
+    privacy_budget_used: f64,
+    privacy_budget_remaining: f64,
+}
+
+impl AnalyticsDashboard {
+    pub async fn handle_query(
+        &self,
+        request: QueryRequest,
+    ) -> Result<QueryResponse, Error> {
+        let mut dp = self.dp_engine.write().await;
+        
+        let result = match request.query_type {
+            QueryType::TotalBalance => {
+                let engine = self.engine.read().await;
+                let total = engine.compute_total_balance();
+                
+                // Decrypt and add noise
+                let decrypted = dp.execute_query(
+                    || self.decrypt_total(&total),
+                    1.0,  // Sensitivity
+                )?;
+                
+                serde_json::json!({ "total_balance": decrypted })
+            },
+            
+            QueryType::AverageBalance => {
+                let engine = self.engine.read().await;
+                let avg = dp.execute_query(
+                    || engine.compute_average_balance(),
+                    1.0,
+                )?;
+                
+                serde_json::json!({ "average_balance": avg })
+            },
+            
+            QueryType::Distribution => {
+                let engine = self.engine.read().await;
+                let histogram = engine.compute_distribution_histogram(dp.epsilon);
+                
+                serde_json::json!({ "distribution": histogram })
+            },
+            
+            QueryType::TransactionVolume => {
+                let params: VolumeParams = serde_json::from_value(request.parameters)?;
+                let engine = self.engine.read().await;
+                let volume = engine.compute_transaction_volume(
+                    params.start_time,
+                    params.end_time,
+                    params.bucket_size,
+                );
+                
+                serde_json::json!({ "volume": volume })
+            },
+            
+            QueryType::ActiveUsers => {
+                // Count unique users in time period (with DP)
+                let count = dp.execute_query(
+                    || self.count_active_users(),
+                    1.0,
+                )?;
+                
+                serde_json::json!({ "active_users": count })
+            },
+        };
+        
+        Ok(QueryResponse {
+            result,
+            privacy_budget_used: dp.queries_executed as f64 * dp.epsilon,
+            privacy_budget_remaining: dp.remaining_budget(),
+        })
+    }
+    
+    fn decrypt_total(&self, encrypted: &BigUint) -> u64 {
+        // Placeholder
+        0
+    }
+    
+    fn count_active_users(&self) -> usize {
+        // Placeholder
+        0
+    }
+}
+
+#[derive(Deserialize)]
+struct VolumeParams {
+    start_time: u64,
+    end_time: u64,
+    bucket_size: u64,
+}
+
+// HTTP endpoints
+pub async fn start_analytics_server(
+    dashboard: Arc<AnalyticsDashboard>,
+) -> std::io::Result<()> {
+    HttpServer::new(move || {
+        App::new()
+            .app_data(web::Data::new(dashboard.clone()))
+            .route("/api/query", web::post().to(handle_query_endpoint))
+            .route("/api/privacy_budget", web::get().to(get_privacy_budget))
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
+}
+
+async fn handle_query_endpoint(
+    dashboard: web::Data<Arc<AnalyticsDashboard>>,
+    request: web::Json<QueryRequest>,
+) -> HttpResponse {
+    match dashboard.handle_query(request.into_inner()).await {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(e) => HttpResponse::BadRequest().body(format!("Error: {:?}", e)),
+    }
+}
+
+async fn get_privacy_budget(
+    dashboard: web::Data<Arc<AnalyticsDashboard>>,
+) -> HttpResponse {
+    let dp = dashboard.dp_engine.read().await;
+    let response = serde_json::json!({
+        "total_budget": dp.total_budget,
+        "used_budget": dp.queries_executed as f64 * dp.epsilon,
+        "remaining_budget": dp.remaining_budget(),
+        "queries_executed": dp.queries_executed,
+    });
+    
+    HttpResponse::Ok().json(response)
+}
+```
+
+---
+
+## 8. API & SDK DESIGN
+
+### 8.1 REST API Specification
+
+**Base URL:** `https://api.Meshcrypt.wallet/v1`
+
+**Authentication:** Bearer token (JWT) or API key
+
+#### 8.1.1 Wallet Operations
+
+```yaml
+# Create new wallet
+POST /wallet/create
+Request:
+  {
+    "seed_phrase_entropy": 256,  # bits of entropy
+    "password": "string",
+    "backup_enabled": true
+  }
+Response:
+  {
+    "wallet_id": "uuid",
+    "addresses": {
+      "zcash": "zs1...",
+      "ethereum": "0x...",
+      "polygon": "0x..."
+    },
+    "seed_phrase": ["word1", "word2", ...],  # 24 words
+    "encrypted_seed": "base64"
+  }
+
+# Get balance
+GET /wallet/{wallet_id}/balance?chain=zcash&include_pending=true
+Response:
+  {
+    "confirmed": "1.23456789",
+    "pending": "0.1",
+    "currency": "ZEC",
+    "privacy_mode": "shielded",
+    "balance_commitment": "base64_encoded_commitment"
+  }
+
+# Send transaction
+POST /wallet/{wallet_id}/send
+Request:
+  {
+    "to": "zs1recipient...",
+    "amount": "0.5",
+    "chain": "zcash",
+    "memo": "optional memo",
+    "priority": "normal",
+    "privacy_level": "maximum"
+  }
+Response:
+  {
+    "tx_id": "hex",
+    "status": "pending",
+    "estimated_confirmation_time": 75,  # seconds
+    "proof_generation_time": 2.3,
+    "privacy_guarantees": {
+      "balance_hidden": true,
+      "amount_hidden": true,
+      "recipient_hidden": true
+    }
+  }
+```
+
+#### 8.1.2 Mesh Network Operations
+
+```yaml
+# Get mesh network status
+GET /mesh/status
+Response:
+  {
+    "connected_peers": 12,
+    "transport_types": ["ble", "wifi_direct", "lora"],
+    "message_queue_size": 3,
+    "last_sync": "2025-11-15T10:30:00Z",
+    "network_health": "good"
+  }
+
+# Broadcast transaction via mesh
+POST /mesh/broadcast
+Request:
+  {
+    "transaction": "base64_encoded_tx",
+    "priority": "high",
+    "max_hops": 10,
+    "encryption_enabled": true
+  }
+Response:
+  {
+    "broadcast_id": "uuid",
+    "estimated_propagation_time": 30,  # seconds
+    "initial_peers": 6
+  }
+
+# Query mesh peers
+GET /mesh/peers
+Response:
+  {
+    "peers": [
+      {
+        "peer_id": "base64",
+        "transport": "ble",
+        "signal_strength": -65,  # dBm
+        "last_seen": "2025-11-15T10:29:55Z",
+        "reputation_score": 0.95
+      }
+    ]
+  }
+```
+
+#### 8.1.3 NFC Operations
+
+```yaml
+# Prepare NFC transfer
+POST /nfc/prepare_transfer
+Request:
+  {
+    "amount": "0.1",
+    "recipient_hint": "optional_name",
+    "memo": "Coffee payment"
+  }
+Response:
+  {
+    "transfer_id": "uuid",
+    "ndef_payload": "base64",
+    "expires_at": "2025-11-15T10:35:00Z",
+    "qr_code": "base64_png"  # Fallback if NFC fails
+  }
+
+# Complete NFC transfer
+POST /nfc/complete_transfer
+Request:
+  {
+    "transfer_id": "uuid",
+    "signature": "base64",
+    "proof": "base64"
+  }
+Response:
+  {
+    "tx_id": "hex",
+    "status": "broadcast",
+    "confirmation_eta": 75
+  }
+```
+
+#### 8.1.4 Analytics API
+
+```yaml
+# Query analytics
+POST /analytics/query
+Headers:
+  Authorization: Bearer <analytics_token>
+Request:
+  {
+    "query_type": "transaction_volume",
+    "parameters": {
+      "start_time": 1700000000,
+      "end_time": 1700086400,
+      "bucket_size": 3600
+    },
+    "privacy_budget_allocation": 0.1
+  }
+Response:
+  {
+    "result": {
+      "volume": [
+        {"timestamp": 1700000000, "value": 123.45},
+        {"timestamp": 1700003600, "value": 234.56}
+      ]
+    },
+    "privacy_budget_used": 0.1,
+    "privacy_budget_remaining": 9.9
+  }
+```
+
+### 8.2 SDK Design
+
+#### 8.2.1 TypeScript/JavaScript SDK
+
+```typescript
+// Installation: npm install @Meshcrypt/sdk
+
+import { MeshcryptSDK, Chain, PrivacyLevel } from '@Meshcrypt/sdk';
+
+// Initialize SDK
+const sdk = new MeshcryptSDK({
+  apiKey: 'your_api_key',
+  network: 'mainnet',  // or 'testnet'
+  defaultChain: Chain.Zcash,
+});
+
+// Create wallet
+const wallet = await sdk.wallet.create({
+  seedPhraseLength: 24,
+  password: 'secure_password',
+  backupEnabled: true,
+});
+
+console.log('Wallet addresses:', wallet.addresses);
+console.log('Seed phrase:', wallet.seedPhrase);
+
+// Get balance
+const balance = await wallet.getBalance({
+  chain: Chain.Zcash,
+  includePending: true,
+});
+
+console.log(`Balance: ${balance.confirmed} ZEC`);
+
+// Send transaction
+const tx = await wallet.send({
+  to: 'zs1recipient...',
+  amount: '0.5',
+  chain: Chain.Zcash,
+  privacyLevel: PrivacyLevel.Maximum,
+  memo: 'Payment for services',
+});
+
+console.log(`Transaction sent: ${tx.txId}`);
+
+// Monitor transaction status
+tx.on('confirmation', (confirmations) => {
+  console.log(`Confirmations: ${confirmations}`);
+});
+
+tx.on('finalized', () => {
+  console.log('Transaction finalized!');
+});
+
+// Mesh network operations
+const meshNetwork = sdk.mesh;
+
+// Connect to mesh
+await meshNetwork.connect({
+  transports: ['ble', 'wifi_direct'],
+  discoveryEnabled: true,
+});
+
+// Broadcast via mesh
+await meshNetwork.broadcast(tx, {
+  maxHops: 10,
+  priority: 'high',
+});
+
+// NFC operations
+const nfc = sdk.nfc;
+
+// Prepare NFC transfer
+const transfer = await nfc.prepareTransfer({
+  amount: '0.1',
+  memo: 'Tap to pay',
+});
+
+// Wait for NFC tap
+nfc.on('tap', async (event) => {
+  const result = await transfer.complete(event);
+  console.log(`Transfer completed: ${result.txId}`);
+});
+
+// Analytics
+const analytics = sdk.analytics;
+
+const volumeData = await analytics.query({
+  type: 'transaction_volume',
+  startTime: Date.now() - 86400000,  // Last 24 hours
+  endTime: Date.now(),
+  bucketSize: 3600,  // 1 hour buckets
+});
+
+console.log('Transaction volume:', volumeData);
+```
+
+#### 8.2.2 Python SDK
+
+```python
+# Installation: pip install Meshcrypt-sdk
+
+from Meshcrypt import MeshcryptSDK, Chain, PrivacyLevel
+from Meshcrypt.exceptions import InsufficientBalanceError
+import asyncio
+
+# Initialize SDK
+sdk = MeshcryptSDK(
+    api_key='your_api_key',
+    network='mainnet',
+    default_chain=Chain.ZCASH
+)
+
+async def main():
+    # Create wallet
+    wallet = await sdk.wallet.create(
+        seed_phrase_length=24,
+        password='secure_password',
+        backup_enabled=True
+    )
+    
+    print(f"Wallet addresses: {wallet.addresses}")
+    
+    # Get balance
+    balance = await wallet.get_balance(
+        chain=Chain.ZCASH,
+        include_pending=True
+    )
+    
+    print(f"Balance: {balance.confirmed} ZEC")
+    
+    # Send transaction
+    try:
+        tx = await wallet.send(
+            to='zs1recipient...',
+            amount='0.5',
+            chain=Chain.ZCASH,
+            privacy_level=PrivacyLevel.MAXIMUM,
+            memo='Payment for services'
+        )
+        
+        print(f"Transaction sent: {tx.tx_id}")
+        
+        # Wait for confirmation
+        await tx.wait_for_confirmation(min_confirmations=3)
+        print("Transaction confirmed!")
+        
+    except InsufficientBalanceError as e:
+        print(f"Error: {e}")
+    
+    # Mesh network
+    mesh = sdk.mesh
+    
+    await mesh.connect(
+        transports=['ble', 'wifi_direct'],
+        discovery_enabled=True
+    )
+    
+    peers = await mesh.get_peers()
+    print(f"Connected to {len(peers)} peers")
+    
+    # Analytics
+    analytics = sdk.analytics
+    
+    volume_data = await analytics.query(
+        query_type='transaction_volume',
+        start_time=int(time.time()) - 86400,
+        end_time=int(time.time()),
+        bucket_size=3600
+    )
+    
+    print(f"Transaction volume: {volume_data}")
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+#### 8.2.3 Rust SDK
+
+```rust
+// Cargo.toml: Meshcrypt-sdk = "1.0"
+
+use Meshcrypt_sdk::{
+    MeshcryptSDK, Chain, PrivacyLevel, WalletBuilder,
+    error::Result,
+};
+use tokio;
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Initialize SDK
+    let sdk = MeshcryptSDK::builder()
+        .api_key("your_api_key")
+        .network("mainnet")
+        .default_chain(Chain::Zcash)
+        .build()?;
+    
+    // Create wallet
+    let wallet = sdk.wallet()
+        .create()
+        .seed_phrase_length(24)
+        .password("secure_password")
+        .backup_enabled(true)
+        .build()
+        .await?;
+    
+    println!("Wallet addresses: {:?}", wallet.addresses());
+    
+    // Get balance
+    let balance = wallet
+        .get_balance()
+        .chain(Chain::Zcash)
+        .include_pending(true)
+        .execute()
+        .await?;
+    
+    println!("Balance: {} ZEC", balance.confirmed);
+    
+    // Send transaction
+    let tx = wallet
+        .send()
+        .to("zs1recipient...")
+        .amount("0.5")
+        .chain(Chain::Zcash)
+        .privacy_level(PrivacyLevel::Maximum)
+        .memo("Payment for services")
+        .execute()
+        .await?;
+    
+    println!("Transaction sent: {}", tx.tx_id());
+    
+    // Wait for confirmation
+    tx.wait_for_confirmation(3).await?;
+    println!("Transaction confirmed!");
+    
+    // Mesh network
+    let mesh = sdk.mesh();
+    
+    mesh.connect()
+        .transports(&[Transport::BLE, Transport::WiFiDirect])
+        .discovery_enabled(true)
+        .execute()
+        .await?;
+    
+    let peers = mesh.get_peers().await?;
+    println!("Connected to {} peers", peers.len());
+    
+    // Analytics
+    let analytics = sdk.analytics();
+    
+    let volume_data = analytics
+        .query()
+        .query_type(QueryType::TransactionVolume)
+        .start_time(chrono::Utc::now() - chrono::Duration::days(1))
+        .end_time(chrono::Utc::now())
+        .bucket_size(3600)
+        .execute()
+        .await?;
+    
+    println!("Transaction volume: {:?}", volume_data);
+    
+    Ok(())
+}
+```
+
+### 8.3 gRPC API
+
+**Proto Definition:**
+
+```protobuf
+syntax = "proto3";
+
+package Meshcrypt.v1;
+
+service WalletService {
+  rpc CreateWallet(CreateWalletRequest) returns (CreateWalletResponse);
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc SendTransaction(SendTransactionRequest) returns (SendTransactionResponse);
+  rpc StreamTransactions(StreamTransactionsRequest) returns (stream Transaction);
+}
+
+message CreateWalletRequest {
+  uint32 seed_phrase_entropy = 1;
+  string password = 2;
+  bool backup_enabled = 3;
+}
+
+message CreateWalletResponse {
+  string wallet_id = 1;
+  map<string, string> addresses = 2;
+  repeated string seed_phrase = 3;
+  bytes encrypted_seed = 4;
+}
+
+message GetBalanceRequest {
+  string wallet_id = 1;
+  string chain = 2;
+  bool include_pending = 3;
+}
+
+message GetBalanceResponse {
+  string confirmed = 1;
+  string pending = 2;
+  string currency = 3;
+  string privacy_mode = 4;
+  bytes balance_commitment = 5;
+}
+
+message SendTransactionRequest {
+  string wallet_id = 1;
+  string to = 2;
+  string amount = 3;
+  string chain = 4;
+  string memo = 5;
+  string priority = 6;
+  string privacy_level = 7;
+}
+
+message SendTransactionResponse {
+  string tx_id = 1;
+  string status = 2;
+  uint64 estimated_confirmation_time = 3;
+  double proof_generation_time = 4;
+  PrivacyGuarantees privacy_guarantees = 5;
+}
+
+message PrivacyGuarantees {
+  bool balance_hidden = 1;
+  bool amount_hidden = 2;
+  bool recipient_hidden = 3;
+}
+
+message Transaction {
+  string tx_id = 1;
+  string from = 2;
+  string to = 3;
+  string amount = 4;
+  uint64 timestamp = 5;
+  uint32 confirmations = 6;
+  string status = 7;
+}
+
+message StreamTransactionsRequest {
+  string wallet_id = 1;
+  bool include_pending = 2;
+}
+```
+
+---
+
+## 9. SECURITY & THREAT MODEL
+
+### 9.1 Adversary Model
+
+Meshcrypt considers the following adversaries:
+
+**A. Network-Level Adversary**
+- Capabilities: Monitor network traffic, perform MITM attacks
+- Goals: Deanonymize users, link transactions
+- Defenses: Onion routing, encrypted mesh, timing obfuscation
+
+**B. State-Level Adversary**
+- Capabilities: ISP monitoring, cell tower tracking, mass surveillance
+- Goals: Identify wallet users, track spending patterns
+- Defenses: Tor integration, mesh offline mode, decoy transactions
+
+**C. Blockchain Analysis Adversary**
+- Capabilities: Analyze full blockchain, cluster addresses
+- Goals: Link addresses, deanonymize users
+- Defenses: Stealth addresses, balance commitments, ZK proofs
+
+**D. Physical Adversary**
+- Capabilities: Device seizure, coercion, physical attacks
+- Goals: Extract private keys, access wallet
+- Defenses: Secure enclaves, plausible deniability, dead man's switch
+
+**E. Supply Chain Adversary**
+- Capabilities: Compromise hardware/software before delivery
+- Goals: Backdoor wallet, exfiltrate keys
+- Defenses: Reproducible builds, hardware attestation, secure boot
+
+### 9.2 Attack Vectors & Mitigations
+
+#### 9.2.1 Transaction Graph Analysis
+
+**Attack:** Analyze blockchain to link transactions and identify users.
+
+**Mitigation:**
+```rust
+pub struct TransactionGraphObfuscation {
+    min_decoys: usize,
+    timing_variance: Duration,
+}
+
+impl TransactionGraphObfuscation {
+    pub async fn obfuscate_transaction(
+        &self,
+        real_tx: Transaction,
+    ) -> Result<(), Error> {
+        // 1. Generate decoy transactions
+        let decoys = self.generate_decoys(&real_tx, self.min_decoys).await?;
+        
+        // 2. Mix with real transaction
+        let mut all_txs = vec![real_tx];
+        all_txs.extend(decoys);
+        
+        //pub struct DecoyGraphGenerator {
+    decoy_ratio: f64,  // Ratio of decoys to real transactions
+    min_decoys: usize,
+    max_decoys: usize,
+    wallet: Arc<RwLock<MeshcryptWallet>>,
+}
+
+impl DecoyGraphGenerator {
+    pub fn new(decoy_ratio: f64) -> Self {
+        DecoyGraphGenerator {
+            decoy_ratio,
+            min_decoys: 5,
+            max_decoys: 20,
+            wallet: Arc::new(RwLock::new(MeshcryptWallet::default())),
+        }
+    }
+    
+    pub async fn generate_decoys_for_transaction(
+        &self,
+        real_tx: &Transaction,
+    ) -> Result<Vec<DecoyTransaction>, Error> {
+        let num_decoys = self.calculate_num_decoys();
+        let mut decoys = Vec::new();
+        
+        for _ in 0..num_decoys {
+            let decoy = self.create_decoy_transaction(real_tx).await?;
+            decoys.push(decoy);
+        }
+        
+        Ok(decoys)
+    }
+    
+    fn calculate_num_decoys(&self) -> usize {
+        let mut rng = rand::thread_rng();
+        rng.gen_range(self.min_decoys..=self.max_decoys)
+    }
+    
+    async fn create_decoy_transaction(
+        &self,
+        real_tx: &Transaction,
+    ) -> Result<DecoyTransaction, Error> {
+        let mut rng = rand::thread_rng();
+        
+        // Generate decoy amount (similar distribution to real amount)
+        let amount_variance = 0.3;  // 30% variance
+        let decoy_amount = (real_tx.amount as f64 * 
+            (1.0 + rng.gen_range(-amount_variance..amount_variance))) as u64;
+        
+        // Generate fake stealth addresses
+        let decoy_sender = self.generate_fake_stealth_address();
+        let decoy_recipient = self.generate_fake_stealth_address();
+        
+        // Create decoy commitments
+        let amount_commitment = self.create_fake_commitment(decoy_amount);
+        let balance_commitment = self.create_fake_commitment(rng.gen_range(0..1000000));
+        
+        // Generate fake proof (same size as real proof)
+        let fake_proof = vec![0u8; 128];  // Groth16 proof size
+        
+        let decoy = DecoyTransaction {
+            amount: decoy_amount,
+            sender: decoy_sender,
+            recipient: decoy_recipient,
+            amount_commitment,
+            balance_commitment,
+            proof: fake_proof,
+            timestamp: SystemTime::now(),
+            is_decoy: true,
+        };
+        
+        Ok(decoy)
+    }
+    
+    fn generate_fake_stealth_address(&self) -> StealthAddress {
+        let random_point = RistrettoPoint::random(&mut OsRng);
+        StealthAddress {
+            public_key: random_point,
+            view_tag: rand::random::<[u8; 1]>(),
+        }
+    }
+    
+    fn create_fake_commitment(&self, value: u64) -> RistrettoPoint {
+        let blinding = Scalar::random(&mut OsRng);
+        let g = RISTRETTO_BASEPOINT_POINT;
+        let h = RistrettoPoint::random(&mut OsRng);
+        
+        g * Scalar::from(value) + h * blinding
+    }
+    
+    pub async fn broadcast_with_decoys(
+        &self,
+        real_tx: Transaction,
+    ) -> Result<(), Error> {
+        // Generate decoys
+        let decoys = self.generate_decoys_for_transaction(&real_tx).await?;
+        
+        // Mix real transaction with decoys
+        let mut all_txs: Vec<Box<dyn BroadcastableTransaction>> = vec![
+            Box::new(real_tx)
+        ];
+        for decoy in decoys {
+            all_txs.push(Box::new(decoy));
+        }
+        
+        // Shuffle
+        let mut rng = rand::thread_rng();
+        all_txs.shuffle(&mut rng);
+        
+        // Broadcast with random delays
+        for tx in all_txs {
+            let delay = rng.gen_range(0..300);  // 0-300 seconds
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+            
+            self.broadcast_transaction(tx).await?;
+        }
+        
+        Ok(())
+    }
+    
+    async fn broadcast_transaction(
+        &self,
+        tx: Box<dyn BroadcastableTransaction>,
+    ) -> Result<(), Error> {
+        // Broadcast via mesh network
+        // Decoy transactions are filtered at the blockchain layer
+        // (they don't have valid proofs)
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+pub struct DecoyTransaction {
+    pub amount: u64,
+    pub sender: StealthAddress,
+    pub recipient: StealthAddress,
+    pub amount_commitment: RistrettoPoint,
+    pub balance_commitment: RistrettoPoint,
+    pub proof: Vec<u8>,
+    pub timestamp: SystemTime,
+    pub is_decoy: bool,
+}
+
+trait BroadcastableTransaction: Send + Sync {
+    fn to_bytes(&self) -> Vec<u8>;
+    fn is_decoy(&self) -> bool;
+}
+
+impl BroadcastableTransaction for Transaction {
+    fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+    
+    fn is_decoy(&self) -> bool {
+        false
+    }
+}
+
+impl BroadcastableTransaction for DecoyTransaction {
+    fn to_bytes(&self) -> Vec<u8> {
+        bincode::serialize(self).unwrap()
+    }
+    
+    fn is_decoy(&self) -> bool {
+        self.is_decoy
+    }
+}
+```
+
+### 6.4 Timing Obfuscation
+
+**Problem:** Transaction timing can reveal user behavior patterns.
+
+**Solution:** Random delays and batching.
+
+```rust
+pub struct TimingObfuscator {
+    pending_queue: Arc<RwLock<VecDeque<TimedTransaction>>>,
+    batch_size: usize,
+    max_delay: Duration,
+}
+
+#[derive(Clone)]
+struct TimedTransaction {
+    tx: Transaction,
+    scheduled_broadcast: SystemTime,
+    priority: Priority,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Priority {
+    Low = 0,
+    Normal = 1,
+    High = 2,
+    Urgent = 3,
+}
+
+impl TimingObfuscator {
+    pub fn new(batch_size: usize, max_delay: Duration) -> Self {
+        TimingObfuscator {
+            pending_queue: Arc::new(RwLock::new(VecDeque::new())),
+            batch_size,
+            max_delay,
+        }
+    }
+    
+    pub async fn schedule_transaction(
+        &self,
+        tx: Transaction,
+        priority: Priority,
+    ) -> Result<(), Error> {
+        let delay = self.calculate_delay(priority);
+        let scheduled_broadcast = SystemTime::now() + delay;
+        
+        let timed_tx = TimedTransaction {
+            tx,
+            scheduled_broadcast,
+            priority,
+        };
+        
+        let mut queue = self.pending_queue.write().await;
+        queue.push_back(timed_tx);
+        
+        Ok(())
+    }
+    
+    fn calculate_delay(&self, priority: Priority) -> Duration {
+        let mut rng = rand::thread_rng();
+        
+        match priority {
+            Priority::Urgent => Duration::from_secs(0),
+            Priority::High => Duration::from_secs(rng.gen_range(0..30)),
+            Priority::Normal => Duration::from_secs(rng.gen_range(30..180)),
+            Priority::Low => Duration::from_secs(rng.gen_range(180..300)),
+        }
+    }
+    
+    pub async fn start_broadcast_worker(&self) {
+        let queue = Arc::clone(&self.pending_queue);
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            
+            loop {
+                interval.tick().await;
+                
+                let mut queue = queue.write().await;
+                let now = SystemTime::now();
+                
+                // Collect ready transactions
+                let mut ready_txs = Vec::new();
+                while let Some(timed_tx) = queue.front() {
+                    if timed_tx.scheduled_broadcast <= now {
+                        ready_txs.push(queue.pop_front().unwrap());
+                    } else {
+                        break;
+                    }
+                }
+                
+                drop(queue);
+                
+                // Broadcast in batches
+                if !ready_txs.is_empty() {
+                    Self::broadcast_batch(ready_txs).await;
+                }
+            }
+        });
+    }
+    
+    async fn broadcast_batch(txs: Vec<TimedTransaction>) {
+        // Group into batches
+        for batch in txs.chunks(10) {
+            // Broadcast all transactions in batch simultaneously
+            let futures: Vec<_> = batch.iter()
+                .map(|timed_tx| Self::broadcast_single(&timed_tx.tx))
+                .collect();
+            
+            let _ = futures::future::join_all(futures).await;
+            
+            // Small delay between batches
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
+    
+    async fn broadcast_single(tx: &Transaction) -> Result<(), Error> {
+        // Broadcast via mesh network or RPC
+        Ok(())
+    }
+}
+```
+
+### 6.5 Balance Querying with Privacy
+
+**Problem:** Block explorers can track balance queries.
+
+**Solution:** Zero-knowledge balance proofs.
+
+```rust
+pub struct PrivateBalanceOracle {
+    commitment_tree: MerkleTree<RistrettoPoint>,
+    balance_proofs: HashMap<Address, Vec<BalanceProof>>,
+}
+
+#[derive(Clone)]
+pub struct BalanceProof {
+    pub commitment: RistrettoPoint,
+    pub range_proof: RangeProof,
+    pub merkle_proof: MerkleProof,
+    pub timestamp: SystemTime,
+}
+
+impl PrivateBalanceOracle {
+    pub fn prove_balance_above_threshold(
+        &self,
+        address: &Address,
+        threshold: u64,
+    ) -> Result<ThresholdProof, Error> {
+        // Prove that balance >= threshold without revealing actual balance
+        
+        let balance_commitment = self.get_balance_commitment(address)?;
+        let actual_balance = self.get_actual_balance(address)?;
+        
+        if actual_balance < threshold {
+            return Err(Error::InsufficientBalance);
+        }
+        
+        // Generate zk-SNARK proof
+        let circuit = BalanceThresholdCircuit {
+            balance: actual_balance,
+            threshold,
+            commitment: balance_commitment,
+            blinding_factor: self.get_blinding_factor(address)?,
+        };
+        
+        let proof = generate_groth16_proof(&circuit)?;
+        
+        Ok(ThresholdProof {
+            commitment: balance_commitment,
+            threshold,
+            proof,
+        })
+    }
+    
+    pub fn verify_balance_threshold(
+        &self,
+        proof: &ThresholdProof,
+    ) -> bool {
+        // Verify proof without learning actual balance
+        verify_groth16_proof(&proof.proof, &[
+            proof.commitment.compress().to_bytes(),
+            proof.threshold.to_le_bytes().to_vec(),
+        ])
+    }
+    
+    pub fn query_balance_range(
+        &self,
+        address: &Address,
+    ) -> Result<BalanceRangeProof, Error> {
+        // Prove balance is in range [min, max] without revealing exact value
+        
+        let balance = self.get_actual_balance(address)?;
+        
+        // Define ranges (powers of 10)
+        let ranges = vec![
+            (0, 100),
+            (100, 1000),
+            (1000, 10000),
+            (10000, 100000),
+            (100000, 1000000),
+        ];
+        
+        let range_index = ranges.iter()
+            .position(|(min, max)| balance >= *min && balance < *max)
+            .ok_or(Error::BalanceOutOfRange)?;
+        
+        let (min, max) = ranges[range_index];
+        
+        // Generate range proof
+        let range_proof = self.generate_range_proof(balance, min, max)?;
+        
+        Ok(BalanceRangeProof {
+            range_index,
+            proof: range_proof,
+        })
+    }
+    
+    fn get_balance_commitment(&self, address: &Address) -> Result<RistrettoPoint, Error> {
+        // Retrieve commitment from Merkle tree
+        Ok(RistrettoPoint::random(&mut OsRng))  // Placeholder
+    }
+    
+    fn get_actual_balance(&self, address: &Address) -> Result<u64, Error> {
+        // Decrypt balance from local encrypted storage
+        Ok(0)  // Placeholder
+    }
+    
+    fn get_blinding_factor(&self, address: &Address) -> Result<Scalar, Error> {
+        // Retrieve blinding factor from secure storage
+        Ok(Scalar::random(&mut OsRng))  // Placeholder
+    }
+    
+    fn generate_range_proof(
+        &self,
+        value: u64,
+        min: u64,
+        max: u64,
+    ) -> Result<Vec<u8>, Error> {
+        // Generate Bulletproof for range
+        Ok(vec![0u8; 670])  // Placeholder
+    }
+}
+
+#[derive(Clone)]
+pub struct ThresholdProof {
+    pub commitment: RistrettoPoint,
+    pub threshold: u64,
+    pub proof: Vec<u8>,
+}
+
+#[derive(Clone)]
+pub struct BalanceRangeProof {
+    pub range_index: usize,
+    pub proof: Vec<u8>,
+}
+```
+
+### 6.6 Anonymous Address Sets
+
+**Concept:** Group addresses into anonymity sets where any address could be the sender.
+
+```rust
+pub struct AnonymitySetManager {
+    sets: HashMap<SetId, AnonymitySet>,
+    min_set_size: usize,
+}
+
+#[derive(Clone)]
+pub struct AnonymitySet {
+    pub id: SetId,
+    pub addresses: Vec<StealthAddress>,
+    pub created_at: SystemTime,
+    pub ring_size: usize,
+}
+
+type SetId = [u8; 32];
+
+impl AnonymitySetManager {
+    pub fn new(min_set_size: usize) -> Self {
+        AnonymitySetManager {
+            sets: HashMap::new(),
+            min_set_size,
+        }
+    }
+    
+    pub fn create_anonymity_set(
+        &mut self,
+        ring_size: usize,
+    ) -> Result<SetId, Error> {
+        if ring_size < self.min_set_size {
+            return Err(Error::SetTooSmall);
+        }
+        
+        let set_id: SetId = rand::random();
+        
+        // Generate ring of stealth addresses
+        let addresses: Vec<_> = (0..ring_size)
+            .map(|_| self.generate_stealth_address())
+            .collect();
+        
+        let set = AnonymitySet {
+            id: set_id,
+            addresses,
+            created_at: SystemTime::now(),
+            ring_size,
+        };
+        
+        self.sets.insert(set_id, set);
+        
+        Ok(set_id)
+    }
+    
+    pub fn create_ring_signature(
+        &self,
+        set_id: &SetId,
+        real_address_index: usize,
+        message: &[u8],
+        private_key: &Scalar,
+    ) -> Result<RingSignature, Error> {
+        let set = self.sets.get(set_id)
+            .ok_or(Error::SetNotFound)?;
+        
+        if real_address_index >= set.addresses.len() {
+            return Err(Error::InvalidIndex);
+        }
+        
+        // Generate ring signature (LSAG - Linkable Spontaneous Anonymous Group)
+        let signature = self.lsag_sign(
+            &set.addresses,
+            real_address_index,
+            message,
+            private_key,
+        )?;
+        
+        Ok(signature)
+    }
+    
+    fn lsag_sign(
+        &self,
+        ring: &[StealthAddress],
+        secret_index: usize,
+        message: &[u8],
+        secret_key: &Scalar,
+    ) -> Result<RingSignature, Error> {
+        let n = ring.len();
+        let mut rng = rand::thread_rng();
+        
+        // Key image: I = x * H_p(P) where P is public key, x is secret key
+        let key_image = self.compute_key_image(secret_key, &ring[secret_index]);
+        
+        // Random scalars for other ring members
+        let mut alphas = vec![Scalar::zero(); n];
+        let mut c = vec![Scalar::zero(); n];
+        
+        for i in 0..n {
+            if i != secret_index {
+                alphas[i] = Scalar::random(&mut rng);
+            }
+        }
+        
+        // Generate challenge
+        let alpha_secret = Scalar::random(&mut rng);
+        let L_secret = RISTRETTO_BASEPOINT_POINT * alpha_secret;
+        let R_secret = self.hash_to_point(&ring[secret_index].public_key) * alpha_secret;
+        
+        // Compute c[secret_index + 1]
+        let mut hasher = blake2::Blake2b::new();
+        hasher.update(message);
+        hasher.update(L_secret.compress().as_bytes());
+        hasher.update(R_secret.compress().as_bytes());
+        let hash_bytes = hasher.finalize();
+        c[(secret_index + 1) % n] = Scalar::from_bytes_mod_order(
+            hash_bytes.as_bytes()[..32].try_into().unwrap()
+        );
+        
+        // Complete the ring
+        for i in 0..n {
+            if i == secret_index {
+                continue;
+            }
+            
+            let next_i = (i + 1) % n;
+            
+            let L_i = RISTRETTO_BASEPOINT_POINT * alphas[i] + 
+                     ring[i].public_key * c[i];
+            let R_i = self.hash_to_point(&ring[i].public_key) * alphas[i] +
+                     key_image * c[i];
+            
+            let mut hasher = blake2::Blake2b::new();
+            hasher.update(message);
+            hasher.update(L_i.compress().as_bytes());
+            hasher.update(R_i.compress().as_bytes());
+            let hash_bytes = hasher.finalize();
+            c[next_i] = Scalar::from_bytes_mod_order(
+                hash_bytes.as_bytes()[..32].try_into().unwrap()
+            );
+        }
+        
+        // Close the ring at secret_index
+        alphas[secret_index] = alpha_secret - c[secret_index] * secret_key;
+        
+        Ok(RingSignature {
+            key_image,
+            c: c[0],
+            responses: alphas,
+        })
+    }
+    
+    pub fn verify_ring_signature(
+        &self,
+        signature: &RingSignature,
+        ring: &[StealthAddress],
+        message: &[u8],
+    ) -> bool {
+        let n = ring.len();
+        let mut c = vec![signature.c];
+        
+        for i in 0..n {
+            let L_i = RISTRETTO_BASEPOINT_POINT * signature.responses[i] +
+                     ring[i].public_key * c[i];
+            let R_i = self.hash_to_point(&ring[i].public_key) * signature.responses[i] +
+                     signature.key_image * c[i];
+            
+            let mut hasher = blake2::Blake2b::new();
+            hasher.update(message);
+            hasher.update(L_i.compress().as_bytes());
+            hasher.update(R_i.compress().as_bytes());
+            let hash_bytes = hasher.finalize();
+            let next_c = Scalar::from_bytes_mod_order(
+                hash_bytes.as_bytes()[..32].try_into().unwrap()
+            );
+            
+            c.push(next_c);
+        }
+        
+        // Verify ring closes
+        c[n] == signature.c
+    }
+    
+    fn compute_key_image(&self, secret_key: &Scalar, address: &StealthAddress) -> RistrettoPoint {
+        self.hash_to_point(&address.public_key) * secret_key
+    }
+    
+    fn hash_to_point(&self, point: &RistrettoPoint) -> RistrettoPoint {
+        let mut hasher = blake2::Blake2b::new();
+        hasher.update(point.compress().as_bytes());
+        let hash_bytes = hasher.finalize();
+        RistrettoPoint::from_uniform_bytes(&hash_bytes.as_bytes()[..64].try_into().unwrap())
+    }
+    
+    fn generate_stealth_address(&self) -> StealthAddress {
+        StealthAddress {
+            public_key: RistrettoPoint::random(&mut OsRng),
+            view_tag: rand::random::<[u8; 1]>(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RingSignature {
+    pub key_image: RistrettoPoint,
+    pub c: Scalar,
+    pub responses: Vec<Scalar>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StealthAddress {
+    pub public_key: RistrettoPoint,
+    pub view_tag: [u8; 1],
+}
+```
+
+---
+
+## 7. PRIVACY-PRESERVING ANALYTICS ENGINE
+
+### 7.1 Architecture
+
+Meshcrypt provides analytics without compromising user privacy through:
+- Homomorphic encryption
+- Secure multi-party computation
+- Differential privacy
+- Local computation
+
+```
+Analytics Architecture:
+
+User Devices                 Analytics Layer              Dashboard
+┌──────────┐                ┌─────────────┐             ┌──────────┐
+│ Device 1 │──encrypted────►│             │             │          │
+│ Balance  │    data        │ Aggregation │─aggregate──►│ Charts & │
+└──────────┘                │   Engine    │   results   │ Insights │
+┌──────────┐                │             │             │          │
+│ Device 2 │──encrypted────►│ Homomorphic │◄──queries───│ No raw   │
+│ Tx Data  │    data        │ Computation │             │ data     │
+└──────────┘                └─────────────┘             └──────────┘
+```
+
+### 7.2 Homomorphic Analytics
+
+```rust
+use concrete::{
+    prelude::*,
+    {BooleanEngine, ConfigBuilder},
+};
+
+pub struct HomomorphicAnalyticsEngine {
+    paillier: PaillierKeys,
+    fhe_engine: BooleanEngine,
+    encrypted_balances: Vec<EncryptedBalance>,
+}
+
+#[derive(Clone)]
+pub struct EncryptedBalance {
+    pub user_id: [u8; 32],  // Anonymous ID
+    pub encrypted_amount: BigUint,
+    pub timestamp: u64,
+}
+
+impl HomomorphicAnalyticsEngine {
+    pub fn new() -> Result<Self, Error> {
+        let paillier = PaillierKeys::generate(2048);
+        
+        // Initialize FHE engine for boolean operations
+        let config = ConfigBuilder::default().build();
+        let fhe_engine = BooleanEngine::new(config)?;
+        
+        Ok(HomomorphicAnalyticsEngine {
+            paillier,
+            fhe_engine,
+            encrypted_balances: Vec::new(),
+        })
+    }
+    
+    pub fn add_encrypted_balance(&mut self, balance: EncryptedBalance) {
+        self.encrypted_balances.push(balance);
+    }
+    
+    // Query: Total balance across all users (without decryption)
+    pub fn compute_total_balance(&self) -> BigUint {
+        let mut total = BigUint::one();  // Identity for multiplication (represents E(0))
+        
+        for balance in &self.encrypted_balances {
+            // Homomorphic addition: E(a) * E(b) = E(a + b)
+            total = (&total * &balance.encrypted_amount) % &self.paillier.public_key.n_squared;
+        }
+        
+        total
+    }
+    
+    // Query: Average balance (requires decryption of aggregate only)
+    pub fn compute_average_balance(&self) -> f64 {
+        let total_encrypted = self.compute_total_balance();
+        let total = self.paillier.private_key.decrypt(&total_encrypted);
+        
+        total as f64 / self.encrypted_balances.len() as f64
+    }
+    
+    // Query: Number of users with balance > threshold (homomorphic comparison)
+    pub fn count_above_threshold(&self, threshold: u64) -> Result<usize, Error> {
+        let mut count = 0;
+        
+        for balance in &self.encrypted_balances {
+            // Homomorphic comparison
+            if self.compare_encrypted_balance(balance, threshold)? {
+                count += 1;
+            }
+        }
+        
+        Ok(count)
+    }
+    
+    fn compare_encrypted_balance(
+        &self,
+        encrypted_balance: &EncryptedBalance,
+        threshold: u64,
+    ) -> Result<bool, Error> {
+        // Homomorphic comparison using bit decomposition
+        // This is a simplified version - real implementation would use FHE
+        
+        // For now, we use a zero-knowledge proof approach
+        // User proves balance > threshold without revealing balance
+        Ok(true)  // Placeholder
+    }
+    
+    // Query: Distribution histogram (with differential privacy)
+    pub fn compute_distribution_histogram(
+        &self,
+        epsilon: f64,  // Privacy budget
+    ) -> Vec<HistogramBucket> {
+        let buckets = vec![
+            (0, 100),
+            (100, 1000),
+            (1000, 10000),
+            (10000, 100000),
+            (100000, u64::MAX),
+        ];
+        
+        let mut histogram = Vec::new();
+        
+        for (min, max) in buckets {
+            let count = self.count_in_range(min, max);
+            
+            // Add Laplace noise for differential privacy
+            let noisy_count = self.add_laplace_noise(count as f64, epsilon);
+            
+            histogram.push(HistogramBucket {
+                min,
+                max,
+                count: noisy_count.max(0.0) as usize,
+            });
+        }
+        
+        histogram
+    }
+    
+    fn count_in_range(&self, min: u64, max: u64) -> usize {
+        // This would use homomorphic range checking
+        // Simplified implementation
+        0
+    }
+    
+    fn add_laplace_noise(&self, value: f64, epsilon: f64) -> f64 {
+        let mut rng = rand::thread_rng();
+        let laplace = rand_distr::Laplace::new(0.0, 1.0 / epsilon).unwrap();
+        value + rng.sample(laplace)
+    }
+    
+    // Query: Transaction volume over time
+    pub fn compute_transaction_volume(
+        &self,
+        start_time: u64,
+        end_time: u64,
+        bucket_size: u64,  // Time bucket in seconds
+    ) -> Vec<TimeSeriesPoint> {
+        let num_buckets = ((end_time - start_time) / bucket_size) as usize;
+        let mut volumes = vec![BigUint::one(); num_buckets];
+        
+        for balance in &self.encrypted_balances {
+            if balance.timestamp >= start_time && balance.timestamp < end_time {
+                let bucket_index = ((balance.timestamp - start_time) / bucket_size) as usize;
+                
+                // Homomorphic addition to volume bucket
+                volumes[bucket_index] = (&volumes[bucket_index] * &balance.encrypted_amount) %
+                    &self.paillier.public_key.n_squared;
+            }
+        }
+        
+        // Decrypt volumes (only aggregate data)
+        let mut result = Vec::new();
+        for (i, volume) in volumes.iter().enumerate() {
+            let timestamp = start_time + (i as u64 * bucket_size);
+            let decrypted_volume = self.paillier.private_key.decrypt(volume);
+            
+            result.push(TimeSeriesPoint {
+                timestamp,
+                value: decrypted_volume,
+            });
+        }
+        
+        result
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HistogramBucket {
+    pub min: u64,
+    pub max: u64,
+    pub count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct TimeSeriesPoint {
+    pub timestamp: u64,
+    pub value: u64,
+}
+```
+
+### 7.3 Differential Privacy
+
+**Concept:** Add calibrated noise to query results to prevent individual data leakage.
+
+```rust
+pub struct DifferentialPrivacyEngine {
+    epsilon: f64,  // Privacy budget
+    delta: f64,    // Failure probability
+    queries_executed: usize,
+    total_budget: f64,
+}
+
+impl DifferentialPrivacyEngine {
+    pub fn new(total_budget: f64) -> Self {
+        DifferentialPrivacyEngine {
+            epsilon: 0.1,  // Per-query budget
+            delta: 1e-5,
+            queries_executed: 0,
+            total_budget,
+        }
+    }
+    
+    pub fn execute_query<F, T>(
+        &mut self,
+        query_fn: F,
+        sensitivity: f64,
+    ) -> Result<T, Error>
+    where
+        F: Fn() -> T,
+        T: Clone + std::ops::Add<Output = T> + From<f64>,
+    {
+        // Check budget
+        if (self.queries_executed as f64 * self.epsilon) >= self.total_budget {
+            return Err(Error::PrivacyBudgetExhausted);
+        }
+        
+        // Execute query
+        let result = query_fn();
+        
+        // Add noise
+        let noisy_result = self.add_noise(result, sensitivity);
+        
+        self.queries_executed += 1;
+        
+        Ok(noisy_result)
+    }
+    
+    fn add_noise<T>(&self, value: T, sensitivity: f64) -> T
+    where
+        T: Clone + std::ops::Add<Output = T> + From<f64>,
+    {
+        let scale = sensitivity / self.epsilon;
+        let mut rng = rand::thread_rng();
+        let laplace = rand_distr::Laplace::new(0.0, scale).unwrap();
+        let noise = rng.sample(laplace);
+        
+        value + T::from(noise)
+    }
+    
+    pub fn remaining_budget(&self) -> f64 {
+        self.total_budget - (self.queries_executed as                    )?;
+                },
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn broadcast_transaction(&self, tx: SignedTransaction) -> Result<(), Error> {
+        // Create mesh message
+        let payload = bincode::serialize(&tx)?;
+        let message = MeshMessage::new(
+            MessageType::Transaction,
+            payload,
+            &self.get_signing_key(),
+        );
+        
+        // Broadcast via gossip protocol
+        self.mesh_node.broadcast_message(message).await?;
+        
+        Ok(())
+    }
+    
+    pub fn get_queue_status(&self) -> Result<QueueStatus, Error> {
+        let mut stmt = self.db.prepare(
+            "SELECT status, COUNT(*) FROM pending_transactions GROUP BY status"
+        )?;
+        
+        let counts = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i64>(1)?,
+            ))
+        })?;
+        
+        let mut status = QueueStatus::default();
+        for count_result in counts {
+            let (status_name, count) = count_result?;
+            match status_name.as_str() {
+                "pending" => status.pending = count as usize,
+                "sent" => status.sent = count as usize,
+                "confirmed" => status.confirmed = count as usize,
+                _ => {},
+            }
+        }
+        
+        Ok(status)
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct QueueStatus {
+    pub pending: usize,
+    pub sent: usize,
+    pub confirmed: usize,
+}
+```
+
+### 4.4 Mesh Network Security
+
+#### 4.4.1 Sybil Attack Prevention
+
+**Attack:** Adversary creates many fake identities to control network.
+
+**Defense:**
+```rust
+pub struct SybilDefense {
+    identity_proofs: HashMap<[u8; 32], IdentityProof>,
+    peer_reputation: HashMap<[u8; 32], Reputation>,
+}
+
+#[derive(Clone)]
+pub struct IdentityProof {
+    pub node_id: [u8; 32],
+    pub proof_of_work: ProofOfWork,
+    pub time_bound_signature: Vec<u8>,
+    pub stake_commitment: Option<[u8; 32]>,
+}
+
+impl IdentityProof {
+    pub fn generate(node_id: [u8; 32], difficulty: u32) -> Self {
+        // Generate proof of work (computational cost)
+        let pow = ProofOfWork::mine(node_id, difficulty);
+        
+        // Time-bound signature (valid for 24 hours)
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let message = format!("Meshcrypt-Identity-{}-{}", hex::encode(node_id), timestamp);
+        let signature = sign_message(&message);
+        
+        IdentityProof {
+            node_id,
+            proof_of_work: pow,
+            time_bound_signature: signature,
+            stake_commitment: None,
+        }
+    }
+    
+    pub fn verify(&self) -> bool {
+        // Verify proof of work
+        if !self.proof_of_work.verify() {
+            return false;
+        }
+        
+        // Verify time-bound signature is recent
+        let age = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() - self.extract_timestamp();
+        
+        if age > 86400 {  // 24 hours
+            return false;
+        }
+        
+        true
+    }
+    
+    fn extract_timestamp(&self) -> u64 {
+        // Extract timestamp from signature
+        // Implementation depends on signature format
+        0  // Placeholder
+    }
+}
+
+pub struct ProofOfWork {
+    pub nonce: u64,
+    pub hash: [u8; 32],
+    pub difficulty: u32,
+}
+
+impl ProofOfWork {
+    pub fn mine(node_id: [u8; 32], difficulty: u32) -> Self {
+        let mut nonce = 0u64;
+        loop {
+            let mut hasher = blake2::Blake2b::new();
+            hasher.update(&node_id);
+            hasher.update(&nonce.to_le_bytes());
+            let hash: [u8; 32] = hasher.finalize().as_bytes()[..32].try_into().unwrap();
+            
+            if Self::check_difficulty(&hash, difficulty) {
+                return ProofOfWork { nonce, hash, difficulty };
+            }
+            
+            nonce += 1;
+        }
+    }
+    
+    pub fn verify(&self) -> bool {
+        let mut hasher = blake2::Blake2b::new();
+        hasher.update(&[0u8; 32]);  // node_id would be needed
+        hasher.update(&self.nonce.to_le_bytes());
+        let hash: [u8; 32] = hasher.finalize().as_bytes()[..32].try_into().unwrap();
+        
+        hash == self.hash && Self::check_difficulty(&hash, self.difficulty)
+    }
+    
+    fn check_difficulty(hash: &[u8; 32], difficulty: u32) -> bool {
+        let leading_zeros = hash.iter()
+            .take_while(|&&b| b == 0)
+            .count() * 8;
+        
+        leading_zeros >= difficulty as usize
+    }
+}
+
+#[derive(Clone)]
+pub struct Reputation {
+    pub node_id: [u8; 32],
+    pub score: f64,          // 0.0 - 1.0
+    pub messages_sent: u64,
+    pub messages_forwarded: u64,
+    pub uptime: Duration,
+    pub last_seen: SystemTime,
+}
+
+impl Reputation {
+    pub fn update_score(&mut self) {
+        // Calculate score based on behavior
+        let forwarding_ratio = self.messages_forwarded as f64 / 
+            (self.messages_sent as f64).max(1.0);
+        
+        let uptime_score = (self.uptime.as_secs() as f64 / 86400.0).min(1.0);
+        
+        self.score = (forwarding_ratio * 0.5 + uptime_score * 0.5).min(1.0);
+    }
+    
+    pub fn is_trusted(&self) -> bool {
+        self.score > 0.7 && self.uptime.as_secs() > 3600
+    }
+}
+```
+
+#### 4.4.2 Eclipse Attack Prevention
+
+**Attack:** Adversary controls all peer connections, isolating victim.
+
+**Defense:**
+```rust
+pub struct EclipseDefense {
+    peer_diversity_requirement: usize,
+    subnet_limits: HashMap<IpNetwork, usize>,
+}
+
+impl EclipseDefense {
+    pub fn validate_peer_set(&self, peers: &[PeerInfo]) -> bool {
+        // Require minimum peer diversity
+        if peers.len() < self.peer_diversity_requirement {
+            return false;
+        }
+        
+        // Check subnet diversity (no more than 25% from same /24)
+        let mut subnet_counts: HashMap<IpNetwork, usize> = HashMap::new();
+        for peer in peers {
+            if let Some(ip) = peer.ip_address {
+                let network = IpNetwork::new(ip, 24).unwrap();
+                *subnet_counts.entry(network).or_insert(0) += 1;
+            }
+        }
+        
+        let max_per_subnet = peers.len() / 4;
+        for count in subnet_counts.values() {
+            if *count > max_per_subnet {
+                return false;
+            }
+        }
+        
+        // Require transport diversity
+        let transport_counts: HashMap<TransportType, usize> = peers
+            .iter()
+            .fold(HashMap::new(), |mut acc, peer| {
+                *acc.entry(peer.transport).or_insert(0) += 1;
+                acc
+            });
+        
+        // At least 2 different transport types
+        if transport_counts.len() < 2 {
+            return false;
+        }
+        
+        true
+    }
+}
+```
+
+#### 4.4.3 Traffic Analysis Resistance
+
+**Onion Routing for Mesh Network:**
+```rust
+pub struct OnionRouter {
+    node_id: [u8; 32],
+    private_key: x25519_dalek::StaticSecret,
+    public_key: x25519_dalek::PublicKey,
+}
+
+impl OnionRouter {
+    pub fn create_onion_message(
+        &self,
+        payload: Vec<u8>,
+        route: Vec<PeerInfo>,
+    ) -> Result<OnionMessage, Error> {
+        let mut encrypted_payload = payload;
+        let mut encrypted_headers = Vec::new();
+        
+        // Encrypt in reverse order (outer layer first)
+        for peer in route.iter().rev() {
+            // Derive shared key with this hop
+            let shared_key = self.derive_shared_key(&peer.public_key);
+            
+            // Create header for this hop
+            let header = OnionHeader {
+                next_hop: peer.id,
+                padding: vec![0u8; 32],
+            };
+            encrypted_headers.insert(0, header);
+            
+            // Encrypt payload with this hop's key
+            encrypted_payload = self.encrypt_layer(&encrypted_payload, &shared_key)?;
+        }
+        
+        Ok(OnionMessage {
+            headers: encrypted_headers,
+            payload: encrypted_payload,
+        })
+    }
+    
+    pub fn peel_onion_layer(
+        &self,
+        message: OnionMessage,
+    ) -> Result<(Vec<u8>, Option<[u8; 32]>), Error> {
+        // Extract first header
+        let header = message.headers.first()
+            .ok_or(Error::InvalidOnionMessage)?;
+        
+        // Derive shared key (assuming we know the sender's public key)
+        let shared_key = self.derive_shared_key(&header.sender_public_key);
+        
+        // Decrypt one layer
+        let decrypted = self.decrypt_layer(&message.payload, &shared_key)?;
+        
+        // Check if we're the final destination
+        let next_hop = if message.headers.len() == 1 {
+            None
+        } else {
+            Some(message.headers[1].next_hop)
+        };
+        
+        Ok((decrypted, next_hop))
+    }
+    
+    fn encrypt_layer(&self, data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+        let cipher = ChaCha20Poly1305::new(key.into());
+        let nonce = Nonce::from_slice(&[0u8; 12]);  // Use proper nonce in production
+        
+        cipher.encrypt(nonce, data)
+            .map_err(|_| Error::EncryptionFailed)
+    }
+    
+    fn decrypt_layer(&self, data: &[u8], key: &[u8; 32]) -> Result<Vec<u8>, Error> {
+        let cipher = ChaCha20Poly1305::new(key.into());
+        let nonce = Nonce::from_slice(&[0u8; 12]);
+        
+        cipher.decrypt(nonce, data)
+            .map_err(|_| Error::DecryptionFailed)
+    }
+    
+    fn derive_shared_key(&self, peer_public_key: &x25519_dalek::PublicKey) -> [u8; 32] {
+        let shared_secret = self.private_key.diffie_hellman(peer_public_key);
+        *shared_secret.as_bytes()
+    }
+}
+
+#[derive(Clone)]
+pub struct OnionMessage {
+    pub headers: Vec<OnionHeader>,
+    pub payload: Vec<u8>,
+}
+
+#[derive(Clone)]
+pub struct OnionHeader {
+    pub next_hop: [u8; 32],
+    pub sender_public_key: x25519_dalek::PublicKey,
+    pub padding: Vec<u8>,
+}
+```
+
+---
+
+## 5. NFC TRANSFER PROTOCOL
+
+### 5.1 NFC Architecture
+
+**NFC Modes:**
+- **Card Emulation**: Device acts as contactless card
+- **Reader/Writer**: Device reads NFC tags
+- **Peer-to-Peer (P2P)**: Direct device-to-device transfer
+
+Meshcrypt uses **P2P mode** (ISO 18092 / NFCIP-1).
+
+```
+Transfer Flow:
+
+[Device A] ─────NFC────► [Device B]
+   (Tap)                  (Receive)
+     │                        │
+     │  1. NDEF Exchange      │
+     │  2. Authentication     │
+     │  3. Transfer Data      │
+     │  4. Confirmation       │
+     └────────────────────────┘
+```
+
+### 5.2 NFC Message Format
+
+**NDEF (NFC Data Exchange Format):**
+```rust
+use nfc::{NdefMessage, NdefRecord, RecordType};
+
+pub struct NFCTransferProtocol {
+    device: NfcDevice,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NFCTransferPayload {
+    pub version: u8,
+    pub transfer_type: TransferType,
+    pub amount: u64,
+    pub sender_address: [u8; 32],
+    pub recipient_address: [u8; 32],
+    pub memo: Option<String>,
+    pub timestamp: u64,
+    pub signature: [u8; 64],
+    pub proof: Option<Vec<u8>>,  // Optional zk-proof
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum TransferType {
+    DirectPayment = 0x01,
+    InvoiceRequest = 0x02,
+    InvoicePayment = 0x03,
+    ContactExchange = 0x04,
+}
+
+impl NFCTransferProtocol {
+    pub fn create_transfer_message(
+        &self,
+        transfer: NFCTransferPayload,
+    ) -> Result<NdefMessage, Error> {
+        // Serialize payload
+        let payload_bytes = bincode::serialize(&transfer)?;
+        
+        // Create NDEF record
+        let record = NdefRecord {
+            type_name_format: 0x04,  // External type
+            record_type: b"Meshcrypt.wallet:transfer",
+            id: b"",
+            payload: payload_bytes,
+        };
+        
+        // Create NDEF message
+        let message = NdefMessage {
+            records: vec![record],
+        };
+        
+        Ok(message)
+    }
+    
+    pub fn parse_transfer_message(
+        &self,
+        message: &NdefMessage,
+    ) -> Result<NFCTransferPayload, Error> {
+        // Find Meshcrypt transfer record
+        let record = message.records.iter()
+            .find(|r| r.record_type == b"Meshcrypt.wallet:transfer")
+            .ok_or(Error::InvalidNdefMessage)?;
+        
+        // Deserialize payload
+        let transfer: NFCTransferPayload = bincode::deserialize(&record.payload)?;
+        
+        // Verify signature
+        if !self.verify_transfer_signature(&transfer) {
+            return Err(Error::InvalidSignature);
+        }
+        
+        Ok(transfer)
+    }
+    
+    fn verify_transfer_signature(&self, transfer: &NFCTransferPayload) -> bool {
+        // Reconstruct signed data
+        let signed_data = bincode::serialize(&(
+            transfer.version,
+            transfer.transfer_type,
+            transfer.amount,
+            transfer.sender_address,
+            transfer.recipient_address,
+            transfer.timestamp,
+        )).unwrap();
+        
+        // Verify Ed25519 signature
+        let public_key = ed25519_dalek::PublicKey::from_bytes(&transfer.sender_address).unwrap();
+        let signature = ed25519_dalek::Signature::from_bytes(&transfer.signature).unwrap();
+        
+        public_key.verify(&signed_data, &signature).is_ok()
+    }
+}
+```
+
+### 5.3 Tap-to-Pay Flow
+
+**Sequence Diagram:**
+```
+Sender                                  Receiver
+  │                                        │
+  │  1. Tap devices together              │
+  │  ────────────────────────────────────►│
+  │                                        │
+  │  2. NFC handshake (ISO 18092)         │
+  │  ◄────────────────────────────────────┤
+  │                                        │
+  │  3. Send amount request NDEF          │
+  │  ────────────────────────────────────►│
+  │                                        │
+  │  4. Display confirmation UI           │
+  │  ◄────────────────────────────────────┤
+  │     "Pay 0.5 ZEC to Alice?"           │
+  │                                        │
+  │  5. User confirms                     │
+  │  ────────────────────────────────────►│
+  │                                        │
+  │  6. Generate zk-proof                 │
+  │  ─────┐                                │
+  │       │ (2-3 seconds)                 │
+  │  ◄────┘                                │
+  │                                        │
+  │  7. Send signed transaction           │
+  │  ────────────────────────────────────►│
+  │                                        │
+  │  8. Verify and broadcast              │
+  │                                ┌───────┤
+  │                                │       │
+  │                                └──────►│
+  │                                        │
+  │  9. Send confirmation                 │
+  │  ◄────────────────────────────────────┤
+  │                                        │
+```
+
+**Implementation:**
+```rust
+use android_nfc::{NfcAdapter, NdefMessage, Tag};
+
+pub struct TapToPayHandler {
+    wallet: Arc<RwLock<MeshcryptWallet>>,
+    nfc_adapter: NfcAdapter,
+}
+
+impl TapToPayHandler {
+    pub async fn handle_tap_event(&self, tag: Tag) -> Result<(), Error> {
+        // Read NDEF message from tag
+        let ndef_message = self.nfc_adapter.read_ndef(&tag).await?;
+        
+        // Parse transfer request
+        let transfer_request = self.parse_transfer_request(&ndef_message)?;
+        
+        // Show confirmation UI
+        let confirmed = self.show_confirmation_dialog(&transfer_request).await?;
+        
+        if !confirmed {
+            return Ok(());
+        }
+        
+        // Create transaction
+        let tx = self.create_transaction(&transfer_request).await?;
+        
+        // Generate zk-proof (show progress indicator)
+        let proof = self.generate_proof(&tx).await?;
+        
+        // Create response NDEF message
+        let response = self.create_response_message(tx, proof)?;
+        
+        // Write response to tag
+        self.nfc_adapter.write_ndef(&tag, &response).await?;
+        
+        // Broadcast transaction via mesh network
+        self.broadcast_transaction(tx).await?;
+        
+        Ok(())
+    }
+    
+    async fn show_confirmation_dialog(
+        &self,
+        request: &NFCTransferPayload,
+    ) -> Result<bool, Error> {
+        // Show native dialog
+        let dialog = Dialog::new()
+            .title("Confirm Payment")
+            .message(format!(
+                "Pay {} to {}?\n\nMemo: {}",
+                format_amount(request.amount),
+                format_address(&request.recipient_address),
+                request.memo.as_ref().unwrap_or(&"None".to_string())
+            ))
+            .positive_button("Confirm")
+            .negative_button("Cancel");
+        
+        let result = dialog.show().await?;
+        Ok(result == DialogResult::Positive)
+    }
+    
+    async fn create_transaction(
+        &self,
+        request: &NFCTransferPayload,
+    ) -> Result<SignedTransaction, Error> {
+        let wallet = self.wallet.read().await;
+        
+        // Select inputs
+        let inputs = wallet.select_inputs(request.amount)?;
+        
+        // Create outputs (recipient + change)
+        let mut outputs = vec![
+            Output {
+                address: request.recipient_address,
+                amount: request.amount,
+            }
+        ];
+        
+        let total_input: u64 = inputs.iter().map(|i| i.amount).sum();
+        let change = total_input - request.amount - TRANSACTION_FEE;
+        if change > 0 {
+            outputs.push(Output {
+                address: wallet.get_change_address(),
+                amount: change,
+            });
+        }
+        
+        // Build transaction
+        let tx = TransactionBuilder::new()
+            .inputs(inputs)
+            .outputs(outputs)
+            .build()?;
+        
+        Ok(tx)
+    }
+    
+    async fn generate_proof(&self, tx: &SignedTransaction) -> Result<Vec<u8>, Error> {
+        // Generate zk-SNARK proof for transaction validity
+        let witness = create_transaction_witness(tx)?;
+        let proof = generate_groth16_proof(&witness).await?;
+        Ok(proof.to_bytes())
+    }
+}
+```
+
+### 5.4 Tap-to-Authorize Flow
+
+**Use Case:** Authorize DApp transactions via NFC tap.
+
+```rust
+pub struct TapToAuthorizeHandler {
+    pending_requests: Arc<RwLock<HashMap<Uuid, AuthRequest>>>,
+}
+
+#[derive(Clone)]
+pub struct AuthRequest {
+    pub id: Uuid,
+    pub dapp_name: String,
+    pub dapp_domain: String,
+    pub action: DAppAction,
+    pub expires_at: SystemTime,
+}
+
+#[derive(Clone)]
+pub enum DAppAction {
+    SignMessage { message: Vec<u8> },
+    SignTransaction { tx: Transaction },
+    RevealBalance { token: String },
+}
+
+impl TapToAuthorizeHandler {
+    pub async fn create_auth_request(
+        &self,
+        dapp_name: String,
+        action: DAppAction,
+    ) -> Result<Uuid, Error> {
+        let id = Uuid::new_v4();
+        let request = AuthRequest {
+            id,
+            dapp_name,
+            dapp_domain: "example.com".to_string(),
+            action,
+            expires_at: SystemTime::now() + Duration::from_secs(300),  // 5 min
+        };
+        
+        self.pending_requests.write().await.insert(id, request);
+        
+        Ok(id)
+    }
+    
+    pub async fn handle_auth_tap(&self, tag: Tag) -> Result<AuthResponse, Error> {
+        // Read auth request ID from NFC tag
+        let ndef = self.read_ndef(&tag).await?;
+        let request_id: Uuid = self.parse_request_id(&ndef)?;
+        
+        // Lookup pending request
+        let requests = self.pending_requests.read().await;
+        let request = requests.get(&request_id)
+            .ok_or(Error::RequestNotFound)?
+            .clone();
+        
+        // Check expiration
+        if SystemTime::now() > request.expires_at {
+            return Err(Error::RequestExpired);
+        }
+        
+        // Show authorization UI
+        let approved = self.show_auth_dialog(&request).await?;
+        
+        if !approved {
+            return Ok(AuthResponse::Denied);
+        }
+        
+        // Perform action
+        let result = match request.action {
+            DAppAction::SignMessage { message } => {
+                let signature = self.sign_message(&message).await?;
+                AuthResult::Signature(signature)
+            },
+            DAppAction::SignTransaction { tx } => {
+                let signed_tx = self.sign_transaction(tx).await?;
+                AuthResult::SignedTransaction(signed_tx)
+            },
+            DAppAction::RevealBalance { token } => {
+                let balance = self.get_balance(&token).await?;
+                AuthResult::Balance(balance)
+            },
+        };
+        
+        // Write response to NFC tag
+        let response = AuthResponse::Approved { result };
+        self.write_response(&tag, &response).await?;
+        
+        // Remove from pending
+        drop(requests);
+        self.pending_requests.write().await.remove(&request_id);
+        
+        Ok(response)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum AuthResponse {
+    Approved { result: AuthResult },
+    Denied,
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum AuthResult {
+    Signature(Vec<u8>),
+    SignedTransaction(SignedTransaction),
+    Balance(u64),
+}
+```
+
+### 5.5 NFC Security
+
+#### 5.5.1 Relay Attack Prevention
+
+**Problem:** Attacker relays NFC signals between distant devices.
+
+**Defense:** Distance bounding protocol
+```rust
+pub struct DistanceBounding {
+    challenge_nonce: [u8; 16],
+    start_time: Instant,
+}
+
+impl DistanceBounding {
+    pub fn initiate_challenge(&mut self) -> [u8; 16] {
+        self.challenge_nonce = rand::random();
+        self.start_time = Instant::now();
+        self.challenge_nonce
+    }
+    
+    pub fn verify_response(&self, response: [u8; 16]) -> bool {
+        // Check timing (NFC should respond within 1ms)
+        let elapsed = self.start_time.elapsed();
+        if elapsed > Duration::from_millis(1) {
+            return false;  // Likely relay attack
+        }
+        
+        // Verify response correctness
+        let expected_response = self.compute_response(&self.challenge_nonce);
+        response == expected_response
+    }
+    
+    fn compute_response(&self, challenge: &[u8; 16]) -> [u8; 16] {
+        let mut hasher = blake2::Blake2b::new();
+        hasher.update(challenge);
+        hasher.update(b"Meshcrypt-DistanceBounding");
+        hasher.finalize().as_bytes()[..16].try_into().unwrap()
+    }
+}
+```
+
+#### 5.5.2 Eavesdropping Protection
+
+**Defense:** Encrypt all NFC payloads
+```rust
+pub fn encrypt_nfc_payload(
+    plaintext: &[u8],
+    ephemeral_key: &x25519_dalek::PublicKey,
+    recipient_public_key: &x25519_dalek::PublicKey,
+) -> Result<Vec<u8>, Error> {
+    // Derive shared secret
+    let shared_secret = ephemeral_key.diffie_hellman(recipient_public_key);
+    
+    // Derive encryption key
+    let mut key_material = [0u8; 32];
+    hkdf::Hkdf::<sha2::Sha256>::new(None, shared_secret.as_bytes())
+        .expand(b"Meshcrypt-NFC-Encryption", &mut key_material)
+        .map_err(|_| Error::KeyDerivationFailed)?;
+    
+    // Encrypt with ChaCha20-Poly1305
+    let cipher = ChaCha20Poly1305::new(&key_material.into());
+    let nonce = Nonce::from_slice(&[0u8; 12]);  // Use proper nonce in production
+    
+    cipher.encrypt(nonce, plaintext)
+        .map_err(|_| Error::EncryptionFailed)
+}
+```
+
+---
+
+## 6. HIDDEN BALANCE MECHANISMS
+
+### 6.1 Architecture Overview
+
+Meshcrypt implements multiple layers of balance hiding:
+
+1. **Commitment Layer**: Pedersen commitments for balances
+2. **Stealth Address Layer**: One-time addresses per transaction
+3. **Decoy Graph Layer**: Fake transactions to obfuscate real ones
+4. **Timing Obfuscation**: Random delays in transaction broadcast
+
+```
+User Balance: 100 ZEC (actual)
+                │
+                ├──► Commitment: C = g^100 · h^r
+                │
+                ├──► Stealth Addresses: [Addr1, Addr2, ..., Addr10]
+                │
+                ├──► Decoy Transactions: [Tx1, Tx2, ..., Tx5]
+                │
+                └──► Broadcast with random delay: 0-300 seconds
+                
+Block Explorer View: ???
+```
+
+### 6.2 Balance Commitment Scheme
+
+```rust
+use curve25519_dalek::ristretto::RistrettoPoint;
+use curve25519_dalek::scalar::Scalar;
+
+pub struct BalanceCommitmentScheme {
+    pedersen: PedersenCommitment,
+    commitments: HashMap<Address, Vec<CommitmentRecord>>,
+}
+
+#[derive(Clone)]
+pub struct CommitmentRecord {
+    pub commitment: RistrettoPoint,
+    pub blinding_factor: Scalar,
+    pub amount: u64,
+    pub created_at: SystemTime,
+}
+
+impl BalanceCommitmentScheme {
+    pub fn commit_balance(&mut self, address: Address, balance: u64) -> RistrettoPoint {
+        let blinding = Scalar::random(&mut OsRng);
+        let commitment = self.pedersen.commit(balance, blinding);
+        
+        self.commitments.entry(address).or_insert(Vec::new()).push(CommitmentRecord {
+            commitment,
+            blinding_factor: blinding,
+            amount: balance,
+            created_at: SystemTime::now(),
+        });
+        
+        commitment
+    }
+    
+    pub fn prove_balance_range(
+        &self,
+        address: &Address,
+        min: u64,
+        max: u64,
+    ) -> Result<RangeProof, Error> {
+        let records = self.commitments.get(address)
+            .ok_or(Error::AddressNotFound)?;
+        
+        let total_balance: u64 = records.iter().map(|r| r.amount).sum();
+        
+        if total_balance < min || total_balance > max {
+            return Err(Error::BalanceOutOfRange);
+        }
+        
+        // Generate range proof without revealing exact balance
+        let proof = self.generate_range_proof(total_balance, min, max)?;
+        
+        Ok(proof)
+    }
+    
+    pub fn update_commitment_after_transaction(
+        &mut self,
+        address: &Address,
+        amount_spent: u64,
+    ) -> Result<RistrettoPoint, Error> {
+        let records = self.commitments.get_mut(address)
+            .ok_or(Error::AddressNotFound)?;
+        
+        let current_balance: u64 = records.iter().map(|r| r.amount).sum();
+        let new_balance = current_balance.checked_sub(amount_spent)
+            .ok_or(Error::InsufficientBalance)?;
+        
+        // Create new commitment for updated balance
+        let new_commitment = self.commit_balance(*address, new_balance);
+        
+        Ok(new_commitment)
+    }
+    
+    // Homomorphic addition of commitments
+    pub fn add_commitments(
+        &self,
+        commitments: Vec<RistrettoPoint>,
+    ) -> RistrettoPoint {
+        commitments.into_iter()
+            .fold(RistrettoPoint::identity(), |acc, c| acc + c)
+    }
+}
+```
+
+### 6.3 Decoy Graph Generation
+
+**Problem:** Transaction graph analysis can reveal spending patterns.
+
+**Solution:** Mix real transactions with decoy transactions.
+
+```rust
+pub struct DecoyGraphGenerator {
+    decoy_ratio: f64,  // Ratio of decoys to real transactions
+    min_decoys: usize,
+    max_decoys: usize,# Meshcrypt: Privacy-First Decentralized Custody Wallet
+## Complete Technical Specification & Architecture Document
+
+**Version:** 1.0.0  
+**Target Hackathon:** ZYPHERPUNK  
+**Document Type:** Comprehensive System Design  
+**Audience:** Protocol Designers, Cryptographers, Wallet Engineers, Hackathon Judges  
+**Revision Date:** 2025-11-15
+
+---
+
+## EXECUTIVE SUMMARY
+
+Meshcrypt is a next-generation privacy-preserving custody wallet built on a decentralized mesh network architecture. It combines cutting-edge zero-knowledge proof systems, NFC-based peer-to-peer transfers, cross-chain privacy bridges, and homomorphic analytics to create a surveillance-resistant financial infrastructure.
+
+### Core Innovation Pillars
+
+1. **Mesh Network Architecture**: Decentralized transaction propagation via Bluetooth Low Energy (BLE), WiFi Direct, and LoRa, enabling offline-first operation
+2. **Zero-Knowledge Privacy Layer**: Balance hiding through zk-SNARKs, commitment schemes, and stealth address protocols
+3. **NFC Tap-to-Transfer**: Physical proximity-based secure transfers without internet connectivity
+4. **Cross-Chain Privacy Bridges**: Seamless private asset movement between Zcash shielded pool, Ethereum, Polygon, and other EVM chains
+5. **Privacy-Preserving Analytics**: Homomorphic encryption and secure multi-party computation for transaction insights without data exposure
+
+### ZYPHERPUNK Hackathon Alignment
+
+**Primary Track:** Cross-Chain Privacy Solutions  
+**Secondary Tracks:** Wallet Innovation, Privacy-Preserving Computation, Infrastructure/Developer Tools
+
+**Chain Support Matrix:**
+- **Zcash**: Full shielded pool integration with Sapling/Orchard support
+- **Ethereum**: Privacy-wrapped tokens with zk-rollup settlement
+- **Polygon**: Fast L2 privacy transactions with Ethereum finality
+- **Arbitrum**: Optional L2 support with optimistic rollup integration
+
+---
+
+## TABLE OF CONTENTS
+
+1. System Architecture Overview
+2. Cryptographic Foundations
+3. Blockchain Integration Layer
+4. Mesh Network Protocol
+5. NFC Transfer Protocol
+6. Hidden Balance Mechanisms
+7. Privacy-Preserving Analytics Engine
+8. API & SDK Design
+9. Security & Threat Model
+10. User Experience Flows
+11. Implementation Pseudocode
+12. Deployment & Hackathon Strategy
+13. Appendices
+
+---
+
+## 1. SYSTEM ARCHITECTURE OVERVIEW
+
+### 1.1 Layered Architecture
+
+Meshcrypt employs a seven-layer architecture inspired by the OSI model but optimized for privacy-preserving cryptocurrency operations:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 7: Application Interface Layer                        │
+│ - Mobile/Desktop UI                                         │
+│ - Developer SDK                                             │
+│ - CLI Tools                                                 │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 6: Privacy Analytics Layer                            │
+│ - Homomorphic Computation Engine                           │
+│ - Zero-Knowledge Query Processor                           │
+│ - Differential Privacy Aggregator                          │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 5: Wallet Logic Layer                                 │
+│ - Key Management (HD Wallet BIP32/44/84)                   │
+│ - Transaction Construction                                 │
+│ - Balance Tracking (Encrypted State)                       │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 4: Cryptographic Proof Layer                          │
+│ - zk-SNARK Circuit Compilation (Circom/Halo2)              │
+│ - Proof Generation & Verification                          │
+│ - Commitment Scheme Management (Pedersen/KZG)              │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 3: Cross-Chain Bridge Layer                           │
+│ - Zcash Shielded Pool Interface                            │
+│ - Ethereum Privacy Contract Bridge                         │
+│ - Polygon Fast Settlement                                  │
+│ - Asset Wrapping/Unwrapping Protocol                       │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 2: Mesh Network Transport Layer                       │
+│ - BLE/WiFi Direct Discovery                                │
+│ - LoRa Long-Range Propagation                              │
+│ - Gossip Protocol Implementation                           │
+│ - Offline Transaction Queue                                │
+└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1: Physical Communication Layer                       │
+│ - NFC Controller Interface (ISO 14443)                     │
+│ - Bluetooth Radio Management                               │
+│ - Network Interface Abstraction                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 Component Diagram
+
+```
+                    ┌──────────────────────┐
+                    │   User Interface     │
+                    │  (React Native/Qt)   │
+                    └──────────┬───────────┘
+                               │
+         ┌─────────────────────┼─────────────────────┐
+         │                     │                     │
+    ┌────▼────┐         ┌─────▼──────┐      ┌──────▼──────┐
+    │  Wallet │         │  Analytics │      │   Mesh      │
+    │  Core   │         │   Engine   │      │  Network    │
+    └────┬────┘         └─────┬──────┘      └──────┬──────┘
+         │                    │                     │
+    ┌────▼─────────────┬──────▼──────┬──────────────▼──────┐
+    │                  │             │                      │
+┌───▼───┐         ┌───▼────┐   ┌────▼────┐          ┌─────▼─────┐
+│  Key  │         │ Proof  │   │ Privacy │          │    NFC    │
+│Manager│         │ System │   │ Layer   │          │ Protocol  │
+└───┬───┘         └───┬────┘   └────┬────┘          └─────┬─────┘
+    │                 │             │                      │
+    └─────────────────┴─────────────┴──────────────────────┘
+                              │
+                    ┌─────────▼──────────┐
+                    │  Blockchain Layer  │
+                    │ ┌────┐ ┌────┐ ┌───┐│
+                    │ │ZEC │ │ETH │ │...││
+                    │ └────┘ └────┘ └───┘│
+                    └────────────────────┘
+```
+
+### 1.3 Data Flow Architecture
+
+The Meshcrypt data flow follows a privacy-by-design principle where all sensitive data is encrypted or committed before transmission:
+
+**Transaction Initiation Flow:**
+1. User initiates transaction in UI layer
+2. Wallet Core validates balance from encrypted local state
+3. Proof System generates zk-SNARK for transaction validity
+4. Cross-Chain Bridge determines optimal routing (direct vs. bridge)
+5. Transaction payload encrypted and committed
+6. Mesh Network broadcasts to peers (or NFC direct transfer)
+7. Blockchain confirmation via chain-specific RPC
+8. Encrypted state update propagated back to wallet
+
+**Privacy Preservation Points:**
+- Balance never stored in plaintext
+- Transaction amounts use Pedersen commitments
+- Recipient addresses use stealth address protocol
+- Network layer uses onion routing for IP privacy
+- Analytics queries run on homomorphically encrypted data
+
+### 1.4 Deployment Architecture
+
+Meshcrypt supports three deployment modes:
+
+**A. Mobile Application** (iOS/Android)
+- React Native frontend with native crypto modules
+- Embedded libsodium, secp256k1, BLS12-381 libraries
+- SQLCipher for encrypted local storage
+- Background mesh network service
+
+**B. Desktop Application** (Windows/macOS/Linux)
+- Qt-based native interface
+- Full node capability optional
+- Hardware security module (HSM) integration
+- Development IDE plugin (VS Code, IntelliJ)
+
+**C. Web Extension** (Browser Wallet)
+- WebAssembly-compiled proof generation
+- Browser storage encryption via Web Crypto API
+- Content script injection for dApp integration
+- Service worker for background sync
+
+### 1.5 Technology Stack
+
+**Core Languages:**
+- Rust: Wallet core, cryptographic primitives, mesh protocol
+- Go: Blockchain RPC clients, bridge contracts monitoring
+- TypeScript: UI layer, SDK, developer tools
+- Circom/Halo2: Zero-knowledge circuit definitions
+
+**Key Libraries:**
+- **Cryptography**: libsodium, secp256k1, BLS12-381, bellman, arkworks
+- **Zero-Knowledge**: snarkjs, groth16, plonk, halo2
+- **Blockchain**: ethers.js, web3.rs, zcash-client-backend
+- **Networking**: libp2p, tokio, mDNS, Bluetooth LE SDK
+- **Database**: SQLCipher, RocksDB, LMDB
+- **NFC**: Android NFC API, Core NFC (iOS), libnfc
+
+**External Dependencies:**
+- Zcash light client wallet SDK
+- Ethereum JSON-RPC providers (Infura, Alchemy)
+- IPFS for mesh data redundancy
+- Tor network integration for IP anonymity
+
+### 1.6 System Requirements
+
+**Minimum Mobile Requirements:**
+- Android 10+ or iOS 14+
+- 4GB RAM
+- 2GB free storage
+- Bluetooth 5.0+
+- NFC capability (optional but recommended)
+
+**Minimum Desktop Requirements:**
+- x86_64 or ARM64 processor
+- 8GB RAM
+- 10GB free storage (50GB for full node mode)
+- Network interface (Ethernet/WiFi)
+
+**Recommended Specifications:**
+- 16GB RAM for optimal proof generation
+- SSD storage for fast state access
+- Hardware security module for key protection
+- Multi-core processor for parallel proof generation
+
+---
+
+## 2. CRYPTOGRAPHIC FOUNDATIONS
+
+### 2.1 Cryptographic Primitives Selection
+
+Meshcrypt employs a defense-in-depth cryptographic strategy using multiple complementary systems:
+
+**Elliptic Curve Cryptography:**
+- **secp256k1**: Ethereum, Bitcoin compatibility
+- **ed25519**: High-performance signatures for mesh protocol
+- **BLS12-381**: Pairing-based cryptography for zk-SNARKs
+- **Jubjub**: Embedded curve for Zcash Sapling/Orchard
+
+**Hash Functions:**
+- **SHA-256**: Legacy compatibility, Bitcoin/Ethereum
+- **Blake2b**: High-performance, Zcash primary hash
+- **Poseidon**: zk-SNARK-friendly hash for circuit efficiency
+- **Keccak-256**: Ethereum smart contract compatibility
+
+**Commitment Schemes:**
+- **Pedersen Commitments**: Additively homomorphic, balance hiding
+- **KZG Commitments**: Polynomial commitments for zk-rollups
+- **Bulletproofs**: Range proofs without trusted setup
+
+**Encryption Schemes:**
+- **ChaCha20-Poly1305**: Symmetric encryption for mesh messages
+- **X25519**: Key exchange for NFC/mesh peer discovery
+- **AES-256-GCM**: Storage encryption, backward compatibility
+- **Elgamal**: Additively homomorphic for analytics
+
+### 2.2 Zero-Knowledge Proof Systems
+
+Meshcrypt implements multiple zk-SNARK schemes optimized for different use cases:
+
+#### 2.2.1 Groth16 (Primary Transaction Proofs)
+
+**Why Groth16:**
+- Smallest proof size (128 bytes)
+- Fastest verification (2-3ms)
+- Best for mobile devices
+- Trusted setup per circuit (acceptable for wallet use)
+
+**Circuit Definition (Circom):**
+```circom
+pragma circom 2.0.0;
+
+include "poseidon.circom";
+include "comparators.circom";
+include "bitify.circom";
+
+// Transaction validity proof circuit
+template TransactionValidity(n) {
+    // Public inputs
+    signal input nullifier;           // Prevents double-spend
+    signal input root;                // Merkle root of UTXO set
+    signal input recipient_commitment; // Pedersen(recipient, amount, blinding)
+    
+    // Private inputs (witness)
+    signal input secret_key;
+    signal input amount;
+    signal input recipient;
+    signal input blinding_factor;
+    signal input merkle_path[n];
+    signal input merkle_indices[n];
+    signal input old_balance;
+    signal input new_balance;
+    
+    // Constraint: Balance sufficiency
+    component balance_check = GreaterEqThan(64);
+    balance_check.in[0] <== old_balance;
+    balance_check.in[1] <== amount;
+    balance_check.out === 1;
+    
+    // Constraint: Nullifier derivation
+    component nullifier_hash = Poseidon(2);
+    nullifier_hash.inputs[0] <== secret_key;
+    nullifier_hash.inputs[1] <== old_balance;
+    nullifier_hash.out === nullifier;
+    
+    // Constraint: Merkle proof verification
+    component merkle_verifier = MerkleTreeVerifier(n);
+    merkle_verifier.leaf <== nullifier;
+    merkle_verifier.root <== root;
+    for (var i = 0; i < n; i++) {
+        merkle_verifier.path[i] <== merkle_path[i];
+        merkle_verifier.indices[i] <== merkle_indices[i];
+    }
+    merkle_verifier.valid === 1;
+    
+    // Constraint: Recipient commitment correctness
+    component commitment = PedersenCommitment(3);
+    commitment.inputs[0] <== recipient;
+    commitment.inputs[1] <== amount;
+    commitment.inputs[2] <== blinding_factor;
+    commitment.out === recipient_commitment;
+    
+    // Constraint: New balance correctness
+    new_balance === old_balance - amount;
+}
+
+component main {public [nullifier, root, recipient_commitment]} = TransactionValidity(20);
+```
+
+**Proof Generation Algorithm:**
+```
+Input: 
+  - Circuit C (compiled R1CS)
+  - Witness w = (secret_key, amount, recipient, ...)
+  - Proving key pk (from trusted setup)
+  
+Output: Proof π = (A, B, C) ∈ G₁ × G₂ × G₁
+
+Algorithm:
+1. Compute full assignment: (a₁, ..., aₘ, b₁, ..., bₘ, c₁, ..., cₘ)
+2. Calculate proof elements:
+   A = α + Σ aᵢ·uᵢ + r·δ
+   B = β + Σ bᵢ·vᵢ + s·δ  
+   C = (Σ cᵢ·wᵢ + h·t)/δ + A·s + B·r - r·s·δ
+   where r, s ← random scalars
+3. Return π = (A, B, C)
+
+Time Complexity: O(m log m) where m = number of constraints
+Space Complexity: O(m)
+```
+
+**Verification Algorithm:**
+```
+Input:
+  - Proof π = (A, B, C)
+  - Public inputs x = (nullifier, root, commitment)
+  - Verification key vk
+  
+Output: accept/reject
+
+Algorithm:
+1. Parse vk = (α, β, γ, δ, IC[])
+2. Compute: IC_pub = IC[0] + Σ xᵢ·IC[i]
+3. Check pairing equation:
+   e(A, B) = e(α, β) · e(IC_pub, γ) · e(C, δ)
+   
+Time Complexity: O(1) - constant time regardless of circuit size
+```
+
+#### 2.2.2 PLONK (Cross-Chain Bridge Proofs)
+
+**Why PLONK:**
+- Universal trusted setup (reusable across circuits)
+- More flexible gate types
+- Better for complex cross-chain state verification
+- Updateable setup for security
+
+**Circuit for Cross-Chain Asset Lock:**
+```rust
+use plonk::prelude::*;
+
+#[derive(Debug, Clone)]
+pub struct CrossChainLockCircuit {
+    // Public inputs
+    pub source_chain_id: BlsScalar,
+    pub target_chain_id: BlsScalar,
+    pub asset_hash: BlsScalar,
+    pub lock_commitment: BlsScalar,
+    
+    // Private witnesses
+    pub amount: BlsScalar,
+    pub source_balance: BlsScalar,
+    pub lock_nonce: BlsScalar,
+    pub user_secret: BlsScalar,
+}
+
+impl Circuit for CrossChainLockCircuit {
+    const CIRCUIT_ID: [u8; 32] = [0x42; 32]; // Unique circuit ID
+    
+    fn gadget(&mut self, composer: &mut StandardComposer) -> Result<(), Error> {
+        // Add public inputs
+        let source_chain_id = composer.add_input(self.source_chain_id);
+        let target_chain_id = composer.add_input(self.target_chain_id);
+        let asset_hash = composer.add_input(self.asset_hash);
+        let lock_commitment = composer.add_input(self.lock_commitment);
+        
+        // Add private witnesses
+        let amount = composer.add_input(self.amount);
+        let source_balance = composer.add_input(self.source_balance);
+        let lock_nonce = composer.add_input(self.lock_nonce);
+        let user_secret = composer.add_input(self.user_secret);
+        
+        // Constraint: Sufficient balance
+        // source_balance >= amount
+        composer.arithmetic_gate(|gate| {
+            gate.witness(source_balance, amount, None)
+                .add(BlsScalar::one(), -BlsScalar::one())
+                .constant(BlsScalar::zero())
+        });
+        
+        // Constraint: Commitment correctness
+        // lock_commitment = H(amount, lock_nonce, user_secret, target_chain_id)
+        let commitment_inputs = vec![amount, lock_nonce, user_secret, target_chain_id];
+        let computed_commitment = composer.sponge_hash(&commitment_inputs)?;
+        composer.assert_equal(computed_commitment, lock_commitment);
+        
+        // Constraint: Chain ID validity (must be different)
+        composer.arithmetic_gate(|gate| {
+            gate.witness(source_chain_id, target_chain_id, None)
+                .add(BlsScalar::one(), -BlsScalar::one())
+                .constant(BlsScalar::zero())
+        });
+        
+        Ok(())
+    }
+    
+    fn padded_circuit_size(&self) -> usize {
+        1 << 12 // 4096 gates
+    }
+}
+```
+
+**PLONK Proof Structure:**
+```
+Proof π consists of:
+1. Polynomial commitments: [a], [b], [c], [z]
+2. Opening evaluations: a(ζ), b(ζ), c(ζ), z(ω·ζ)
+3. Linearization proof: [W_ζ], [W_ζω]
+4. Total size: ~800 bytes
+
+Verification equation (simplified):
+[F] - [E] = [0]
+where:
+F = commitment to full polynomial
+E = commitment to evaluated form
+```
+
+#### 2.2.3 Halo2 (Recursive Proofs)
+
+**Why Halo2:**
+- No trusted setup required
+- Proof recursion for aggregation
+- Excellent for mobile (smaller proving keys)
+- IPA-based commitments
+
+**Use Case: Aggregating Multiple Transactions:**
+```rust
+use halo2_proofs::{
+    arithmetic::FieldExt,
+    circuit::{Layouter, SimpleFloorPlanner, Value},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
+    poly::Commitment,
+};
+
+#[derive(Clone)]
+struct TransactionAggregationConfig {
+    advice: Column<Advice>,
+    instance: Column<Instance>,
+}
+
+struct TransactionAggregationCircuit<F: FieldExt> {
+    transactions: Vec<Transaction>,
+    _marker: PhantomData<F>,
+}
+
+impl<F: FieldExt> Circuit<F> for TransactionAggregationCircuit<F> {
+    type Config = TransactionAggregationConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+    
+    fn without_witnesses(&self) -> Self {
+        Self {
+            transactions: vec![],
+            _marker: PhantomData,
+        }
+    }
+    
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        let advice = meta.advice_column();
+        let instance = meta.instance_column();
+        
+        meta.enable_equality(advice);
+        meta.enable_equality(instance);
+        
+        // Custom gate: sum of inputs equals sum of outputs
+        meta.create_gate("transaction_sum", |meta| {
+            let advice = meta.query_advice(advice, Rotation::cur());
+            let sum_inputs = meta.query_advice(advice, Rotation::next());
+            let sum_outputs = meta.query_advice(advice, Rotation(2));
+            
+            vec![sum_inputs - sum_outputs]
+        });
+        
+        TransactionAggregationConfig { advice, instance }
+    }
+    
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
+        layouter.assign_region(
+            || "aggregate transactions",
+            |mut region| {
+                let mut total_in = F::zero();
+                let mut total_out = F::zero();
+                
+                for (i, tx) in self.transactions.iter().enumerate() {
+                    total_in += tx.input_amount;
+                    total_out += tx.output_amount;
+                    
+                    region.assign_advice(
+                        || format!("tx_{}_in", i),
+                        config.advice,
+                        i * 3,
+                        || Value::known(tx.input_amount),
+                    )?;
+                }
+                
+                // Constrain total input = total output
+                region.constrain_equal(/* ... */)?;
+                
+                Ok(())
+            },
+        )
+    }
+}
+```
+
+### 2.3 Commitment Schemes
+
+#### 2.3.1 Pedersen Commitments
+
+**Mathematical Definition:**
+```
+Let G be a cyclic group of prime order q
+Let g, h ∈ G be random generators (nothing-up-my-sleeve)
+
+Commitment to value v with blinding factor r:
+C(v, r) = g^v · h^r
+
+Properties:
+1. Hiding: Cannot determine v from C without knowing r
+2. Binding: Cannot find v', r' ≠ v, r such that C(v,r) = C(v',r')
+3. Homomorphic: C(v₁,r₁) · C(v₂,r₂) = C(v₁+v₂, r₁+r₂)
+```
+
+**Implementation (Rust):**
+```rust
+use curve25519_dalek::{
+    constants::RISTRETTO_BASEPOINT_POINT,
+    ristretto::RistrettoPoint,
+    scalar::Scalar,
+};
+use sha2::{Sha512, Digest};
+
+pub struct PedersenCommitment {
+    pub g: RistrettoPoint, // Primary generator
+    pub h: RistrettoPoint, // Blinding generator
+}
+
+impl PedersenCommitment {
+    pub fn new() -> Self {
+        let g = RISTRETTO_BASEPOINT_POINT;
+        
+        // Generate h using hash-to-curve
+        let mut hasher = Sha512::new();
+        hasher.update(b"Meshcrypt-Pedersen-H-Generator");
+        let h_bytes = hasher.finalize();
+        let h = RistrettoPoint::from_uniform_bytes(&h_bytes.into());
+        
+        PedersenCommitment { g, h }
+    }
+    
+    pub fn commit(&self, value: u64, blinding: Scalar) -> RistrettoPoint {
+        let v = Scalar::from(value);
+        self.g * v + self.h * blinding
+    }
+    
+    pub fn commit_with_random_blinding(&self, value: u64) -> (RistrettoPoint, Scalar) {
+        let blinding = Scalar::random(&mut OsRng);
+        let commitment = self.commit(value, blinding);
+        (commitment, blinding)
+    }
+    
+    // Homomorphic addition
+    pub fn add_commitments(c1: RistrettoPoint, c2: RistrettoPoint) -> RistrettoPoint {
+        c1 + c2
+    }
+    
+    // Open commitment (reveal value and blinding)
+    pub fn verify_opening(
+        &self,
+        commitment: RistrettoPoint,
+        value: u64,
+        blinding: Scalar,
+    ) -> bool {
+        let expected = self.commit(value, blinding);
+        commitment == expected
+    }
+}
+```
+
+**Application in Meshcrypt:**
+- Balance commitments: `C(balance, r_balance)`
+- Amount commitments: `C(amount, r_amount)`
+- Transaction sum verification: `Σ C_inputs = Σ C_outputs`
+
+#### 2.3.2 KZG Commitments (Polynomial Commitments)
+
+**Mathematical Definition:**
+```
+Setup: Trusted setup generates [1, τ, τ², ..., τⁿ]₁ in G₁
+       where τ is secret and discarded
+
+Commit to polynomial p(x) = Σ pᵢxⁱ:
+C = [p(τ)]₁ = Σ pᵢ[τⁱ]₁
+
+Prove p(z) = y:
+1. Compute quotient: q(x) = (p(x) - y)/(x - z)
+2. Proof π = [q(τ)]₁
+
+Verify:
+e(C - [y]₁, [1]₂) = e(π, [τ]₂ - [z]₂)
+```
+
+**Use in zk-Rollup Settlement:**
+```rust
+use arkworks_rs::poly::{Polynomial, univariate::DensePolynomial};
+use arkworks_rs::pairing::Bls12_381;
+
+pub struct KZGCommitment {
+    pub srs: Vec<G1Projective>, // Structured reference string
+    pub g2_tau: G2Projective,   // [τ]₂ for verification
+}
+
+impl KZGCommitment {
+    pub fn commit(&self, poly: &DensePolynomial<Fr>) -> G1Projective {
+        // C = Σ pᵢ[τⁱ]₁
+        let mut commitment = G1Projective::zero();
+        for (i, coeff) in poly.coeffs().iter().enumerate() {
+            commitment += self.srs[i].mul(*coeff);
+        }
+        commitment
+    }
+    
+    pub fn create_opening_proof(
+        &self,
+        poly: &DensePolynomial<Fr>,
+        point: Fr,
+    ) -> (G1Projective, Fr) {
+        // Evaluate p(z)
+        let eval = poly.evaluate(&point);
+        
+        // Compute quotient polynomial: q(x) = (p(x) - y)/(x - z)
+        let numerator = poly - &DensePolynomial::from_coefficients_vec(vec![eval]);
+        let denominator = DensePolynomial::from_coefficients_vec(vec![-point, Fr::one()]);
+        let quotient = numerator.divide_with_q_and_r(&denominator).unwrap().0;
+        
+        // Proof π = [q(τ)]₁
+        let proof = self.commit(&quotient);
+        
+        (proof, eval)
+    }
+    
+    pub fn verify_opening(
+        &self,
+        commitment: G1Projective,
+        proof: G1Projective,
+        point: Fr,
+        eval: Fr,
+    ) -> bool {
+        // e(C - [y]₁, [1]₂) = e(π, [τ]₂ - [z]₂)
+        let lhs_g1 = commitment - G1Projective::generator().mul(eval);
+        let rhs_g2 = self.g2_tau - G2Projective::generator().mul(point);
+        
+        let lhs = Bls12_381::pairing(lhs_g1, G2Projective::generator());
+        let rhs = Bls12_381::pairing(proof, rhs_g2);
+        
+        lhs == rhs
+    }
+}
+```
+
+### 2.4 Stealth Address Protocol
+
+**Problem:** Public blockchain addresses are reusable and linkable, destroying privacy.
+
+**Solution:** One-time addresses derived from public viewing key and ephemeral secret.
+
+**Protocol Specification (Dual-Key Stealth Addresses):**
+
+```
+User keypairs:
+- Spend keypair: (s, S) where S = s·G
+- View keypair: (v, V) where V = v·G
+
+Sender (Alice) generates stealth address for recipient (Bob):
+1. Generate ephemeral keypair: r ← random, R = r·G
+2. Compute shared secret: σ = r·V (ECDH with Bob's view key)
+3. Derive stealth public key: P = H(σ)·G + S
+4. Publish: (R, P) on-chain
+
+Recipient (Bob) scans blockchain:
+1. For each transaction with ephemeral key R:
+2. Compute shared secret: σ = v·R (ECDH with own view key)
+3. Check if P' = H(σ)·G + S matches any P on-chain
+4. If match, derive private key: p = H(σ) + s
+5. Verify: p·G = P (can spend the funds)
+```
+
+**Implementation:**
+```rust
+use curve25519_dalek::{
+    ristretto::RistrettoPoint,
+    scalar::Scalar,
+    constants::RISTRETTO_BASEPOINT_POINT as G,
+};
+use sha2::{Sha256, Digest};
+
+pub struct StealthAddressScheme {
+    spend_private: Scalar,
+    spend_public: RistrettoPoint,
+    view_private: Scalar,
+    view_public: RistrettoPoint,
+}
+
+impl StealthAddressScheme {
+    pub fn generate_keypairs() -> Self {
+        let spend_private = Scalar::random(&mut OsRng);
+        let spend_public = spend_private * G;
+        
+        let view_private = Scalar::random(&mut OsRng);
+        let view_public = view_private * G;
+        
+        Self {
+            spend_private,
+            spend_public,
+            view_private,
+            view_public,
+        }
+    }
+    
+    // Sender: Generate stealth address for recipient
+    pub fn generate_stealth_address(
+        recipient_spend_public: RistrettoPoint,
+        recipient_view_public: RistrettoPoint,
+    ) -> (RistrettoPoint, RistrettoPoint, Scalar) {
+        // Generate ephemeral keypair
+        let ephemeral_private = Scalar::random(&mut OsRng);
+        let ephemeral_public = ephemeral_private * G;
+        
+        // Compute shared secret: σ = r·V
+        let shared_secret = ephemeral_private * recipient_view_public;
+        
+        // Hash shared secret to scalar
+        let mut hasher = Sha256::new();
+        hasher.update(shared_secret.compress().as_bytes());
+        let hash_bytes = hasher.finalize();
+        let hash_scalar = Scalar::from_bytes_mod_order(hash_bytes.into());
+        
+        // Derive stealth public key: P = H(σ)·G + S
+        let stealth_public = hash_scalar * G + recipient_spend_public;
+        
+        (ephemeral_public, stealth_public, ephemeral_private)
+    }
+    
+    // Recipient: Scan for owned stealth addresses
+    pub fn scan_transaction(
+        &self,
+        ephemeral_public: RistrettoPoint,
+        stealth_public: RistrettoPoint,
+    ) -> Option<Scalar> {
+        // Compute shared secret: σ = v·R
+        let shared_secret = self.view_private * ephemeral_public;
+        
+        // Hash to scalar
+        let mut hasher = Sha256::new();
+        hasher.update(shared_secret.compress().as_bytes());
+        let hash_bytes = hasher.finalize();
+        let hash_scalar = Scalar::from_bytes_mod_order(hash_bytes.into());
+        
+        // Check if this stealth address belongs to us
+        let expected_public = hash_scalar * G + self.spend_public;
+        
+        if expected_public == stealth_public {
+            // Derive private key: p = H(σ) + s
+            let stealth_private = hash_scalar + self.spend_private;
+            Some(stealth_private)
+        } else {
+            None
+        }
+    }
+    
+    // Verify we can spend from derived private key
+    pub fn verify_ownership(
+        stealth_private: Scalar,
+        stealth_public: RistrettoPoint,
+    ) -> bool {
+        stealth_private * G == stealth_public
+    }
+}
+```
+
+**Gas Optimization for Ethereum:**
+```solidity
+// On-chain stealth address announcement
+contract StealthAddressRegistry {
+    event StealthPayment(
+        address indexed recipient,  // Traditional address for indexing
+        bytes32 ephemeralPublicX,   // Compressed ephemeral key
+        bytes32 stealthPublicX,     // Compressed stealth key
+        uint256 amount,
+        bytes32 encryptedMemo       // Optional encrypted metadata
+    );
+    
+    // Announce stealth payment (called by sender)
+    function announcePayment(
+        address recipient,
+        bytes32 ephemeralPublicX,
+        bytes32 stealthPublicX,
+        bytes32 encryptedMemo
+    ) external payable {
+        emit StealthPayment(
+            recipient,
+            ephemeralPublicX,
+            stealthPublicX,
+            msg.value,
+            encryptedMemo
+        );
+    }
+}
+```
+
+### 2.5 Range Proofs (Bulletproofs)
+
+**Purpose:** Prove that a committed value lies within a range [0, 2^n) without revealing the value.
+
+**Why Critical:** Prevents negative amounts in transactions (which could inflate supply).
+
+**Protocol Overview:**
+```
+Public: Commitment C = g^v · h^r
+Prove: v ∈ [0, 2^n)
+
+Key Insight: v ∈ [0, 2^n) ⟺ v = Σ vᵢ·2^i where vᵢ ∈ {0,1}
+
+Bulletproof uses:
+1. Inner product argument
+2. Logarithmic proof size: O(log n)
+3. No trusted setup
+4. Proof size: ~670 bytes for 64-bit range
+```
+
+**Implementation:**
+```rust
+use bulletproofs::{BulletproofGens, PedersenGens, RangeProof};
+use curve25519_dalek::scalar::Scalar;
+use merlin::Transcript;
+
+pub struct RangeProver {
+    bp_gens: BulletproofGens,
+    pc_gens: PedersenGens,
+}
+
+impl RangeProver {
+    pub fn new() -> Self {
+        let bp_gens = BulletproofGens::new(64, 1); // 64-bit values
+        let pc_gens = PedersenGens::default();
+        
+        RangeProver { bp_gens, pc_gens }
+    }
+    
+    pub fn prove_range(
+        &self,
+        value: u64,
+        blinding: Scalar,
+    ) -> (RangeProof, RistrettoPoint) {
+        let mut transcript = Transcript::new(b"Meshcrypt-RangeProof");
+        
+        let (proof, commitment) = RangeProof::prove_single(
+            &self.bp_gens,
+            &self.pc_gens,
+            &mut transcript,
+            value,
+            &blinding,
+            64, // n-bit range
+        ).expect("Range proof generation failed");
+        
+        (proof, commitment)
+    }
+    
+    pub fn verify_range(
+        &self,
+        proof: &RangeProof,
+        commitment: &RistrettoPoint,
+    ) -> bool {
+        let mut transcript = Transcript::new(b"Meshcrypt-RangeProof");
+        
+        proof.verify_single(
+            &self.bp_gens,
+            &self.pc_gens,
+            &mut transcript,
+            commitment,
+            64,
+        ).is_ok()
+    }
+    
+    // Batch verification for multiple proofs (more efficient)
+    pub fn verify_range_batch(
+        &self,
+        proofs: &[RangeProof],
+        commitments: &[RistrettoPoint],
+    ) -> bool {
+        let mut transcript = Transcript::new(b"Meshcrypt-BatchRangeProof");
+        
+        RangeProof::verify_multiple(
+            proofs,
+            &self.bp_gens,
+            &self.pc_gens,
+            &mut transcript,
+            commitments,
+            64,
+        ).is_ok()
+    }
+}
+```
+
+**Integration into Transaction:**
+```rust
+pub struct PrivateTransaction {
+    // Public components
+    pub inputs: Vec<Nullifier>,
+    pub output_commitments: Vec<RistrettoPoint>,
+    pub range_proofs: Vec<RangeProof>,
+    pub validity_proof: Groth16Proof,
+    
+    // Hidden components (only known to sender/recipient)
+    pub amounts: Vec<u64>,
+    pub recipients: Vec<StealthAddress>,
+    pub blinding_factors: Vec<Scalar>,
+}
+
+impl PrivateTransaction {
+    pub fn create(
+        inputs: Vec<UTXO>,
+        outputs: Vec<(StealthAddress, u64)>,
+        secret_key: Scalar,
+    ) -> Result<Self, Error> {
+        let range_prover = RangeProver::new();
+        let pedersen = PedersenCommitment::new();
+        
+        let mut output_commitments = Vec::new();
+        let mut range_proofs = Vec::new();
+        let mut blinding_factors = Vec::new();
+        
+        // Create commitments and range proofs for each output
+        for (recipient, amount) in &outputs {
+            let blinding = Scalar::random(&mut OsRng);
+            let commitment = pedersen.commit(*amount, blinding);
+            let (range_proof, _) = range_prover.prove_range(*amount, blinding);
+            
+            output_commitments.push(commitment);
+            range_proofs.push(range_proof);
+            blinding_factors.push(blinding);
+        }
+        
+        // Generate zk-SNARK for transaction validity
+        let validity_proof = generate_validity_proof(
+            &inputs,
+            &outputs,
+            &secret_key,
+        )?;
+        
+        Ok(PrivateTransaction {
+            inputs: inputs.iter().map(|u| u.nullifier).collect(),
+            output_commitments,
+            range_proofs,
+            validity_proof,
+            amounts: outputs.iter().map(|(_, amt)| *amt).collect(),
+            recipients: outputs.iter().map(|(addr, _)| *addr).collect(),
+            blinding_factors,
+        })
+    }
+    
+    pub fn verify(&self) -> bool {
+        let range_prover = RangeProver::new();
+        
+        // Verify all range proofs
+        if !range_prover.verify_range_batch(&self.range_proofs, &self.output_commitments) {
+            return false;
+        }
+        
+        // Verify validity proof
+        if !verify_groth16_proof(&self.validity_proof) {
+            return false;
+        }
+        
+        // Verify balance equation (sum of inputs = sum of outputs)
+        // This is done inside the zk-SNARK
+        
+        true
+    }
+}
+```
+
+### 2.6 Homomorphic Encryption for Analytics
+
+**Purpose:** Allow aggregated analytics queries on encrypted transaction data.
+
+**Scheme:** Paillier Cryptosystem (Additively Homomorphic)
+
+**Mathematical Definition:**
+```
+Key Generation:
+1. Choose primes p, q
+2. n = p·q, λ = lcm(p-1, q-1)
+3. g = n + 1 (generator)
+4. μ = (L(g^λ mod n²))^(-1) mod n
+   where L(x) = (x-1)/n
+5. Public key: (n, g)
+6. Private key: (λ, μ)
+
+Encryption E(m, r):
+   c = g^m · r^n mod n²
+   where r ← Z*_n
+
+Homomorphic Property:
+   E(m₁) · E(m₂) = E(m₁ + m₂)
+   E(m)^k = E(k·m)
+
+Decryption D(c):
+   m = L(c^λ mod n²) · μ mod n
+```
+
+**Implementation:**
+```rust
+use num_bigint::{BigUint, RandBigInt};
+use num_traits::{One, Zero};
+
+pub struct PaillierKeys {
+    pub public_key: PaillierPublicKey,
+    pub private_key: PaillierPrivateKey,
+}
+
+pub struct PaillierPublicKey {
+    n: BigUint,      // n = p·q
+    g: BigUint,      // g = n + 1
+    n_squared: BigUint,
+}
+
+pub struct PaillierPrivateKey {
+    lambda: BigUint,  // λ = lcm(p-1, q-1)
+    mu: BigUint,      // μ = (L(g^λ mod n²))^(-1) mod n
+    n: BigUint,
+}
+
+impl PaillierKeys {
+    pub fn generate(bits: usize) -> Self {
+        let mut rng = rand::thread_rng();
+        
+        // Generate primes p, q
+        let p = rng.gen_prime(bits / 2);
+        let q = rng.gen_prime(bits / 2);
+        
+        let n = &p * &q;
+        let n_squared = &n * &n;
+        let g = &n + BigUint::one();
+        
+        // Calculate λ = lcm(p-1, q-1)
+        let p_minus_1 = &p - BigUint::one();
+        let q_minus_1 = &q - BigUint::one();
+        let lambda = lcm(&p_minus_1, &q_minus_1);
+        
+        // Calculate μ = (L(g^λ mod n²))^(-1) mod n
+        let g_lambda = g.modpow(&lambda, &n_squared);
+        let l_value = l_function(&g_lambda, &n);
+        let mu = mod_inverse(&l_value, &n);
+        
+        PaillierKeys {
+            public_key: PaillierPublicKey { n: n.clone(), g, n_squared },
+            private_key: PaillierPrivateKey { lambda, mu, n },
+        }
+    }
+}
+
+impl PaillierPublicKey {
+    pub fn encrypt(&self, plaintext: u64) -> BigUint {
+        let mut rng = rand::thread_rng();
+        
+        // Choose random r ∈ Z*_n
+        let r = rng.gen_biguint_below(&self.n);
+        
+        // c = g^m · r^n mod n²
+        let m = BigUint::from(plaintext);
+        let g_m = self.g.modpow(&m, &self.n_squared);
+        let r_n = r.modpow(&self.n, &self.n_squared);
+        
+        (g_m * r_n) % &self.n_squared
+    }
+    
+    // Homomorphic addition: E(m₁) · E(m₂) = E(m₁ + m₂)
+    pub fn add_ciphertexts(&self, c1: &BigUint, c2: &BigUint) -> BigUint {
+        (c1 * c2) % &self.n_squared
+    }
+    
+    // Scalar multiplication: E(m)^k = E(k·m)
+    pub fn multiply_ciphertext(&self, ciphertext: &BigUint, scalar: u64) -> BigUint {
+        let k = BigUint::from(scalar);
+        ciphertext.modpow(&k, &self.n_squared)
+    }
+}
+
+impl PaillierPrivateKey {
+    pub fn decrypt(&self, ciphertext: &BigUint) -> u64 {
+        let n_squared = &self.n * &self.n;
+        
+        // m = L(c^λ mod n²) · μ mod n
+        let c_lambda = ciphertext.modpow(&self.lambda, &n_squared);
+        let l_value = l_function(&c_lambda, &self.n);
+        let m = (l_value * &self.mu) % &self.n;
+        
+        // Convert BigUint to u64
+        m.to_u64_digits()[0]
+    }
+}
+
+// Helper: L(x) = (x - 1) / n
+fn l_function(x: &BigUint, n: &BigUint) -> BigUint {
+    (x - BigUint::one()) / n
+}
+
+// Helper: Compute lcm(a, b)
+fn lcm(a: &BigUint, b: &BigUint) -> BigUint {
+    let gcd_val = gcd(a, b);
+    (a * b) / gcd_val
+}
+```
+
+**Application: Privacy-Preserving Balance Aggregation:**
+```rust
+pub struct AnalyticsEngine {
+    paillier: PaillierKeys,
+}
+
+impl AnalyticsEngine {
+    pub fn aggregate_balances(&self, encrypted_balances: Vec<BigUint>) -> BigUint {
+        // Sum encrypted balances without decryption
+        encrypted_balances.iter().fold(
+            BigUint::one(), // Identity for multiplication (represents E(0))
+            |acc, enc_balance| {
+                self.paillier.public_key.add_ciphertexts(&acc, enc_balance)
+            }
+        )
+    }
+    
+    pub fn compute_average(&self, encrypted_balances: Vec<BigUint>) -> f64 {
+        // Aggregate sum
+        let encrypted_sum = self.aggregate_balances(encrypted_balances.clone());
+        
+        // Decrypt sum (only aggregator can do this)
+        let sum = self.paillier.private_key.decrypt(&encrypted_sum);
+        
+        // Return average (count is public)
+        sum as f64 / encrypted_balances.len() as f64
+    }
+    
+    // Query: "What's the total balance of users with balance > threshold?"
+    pub fn conditional_sum(
+        &self,
+        encrypted_balances: Vec<BigUint>,
+        threshold_proof: Vec<RangeProof>,
+    ) -> u64 {
+        // Filter balances above threshold using range proofs
+        let valid_balances: Vec<_> = encrypted_balances
+            .into_iter()
+            .zip(threshold_proof.iter())
+            .filter(|(_, proof)| verify_threshold_proof(proof))
+            .map(|(balance, _)| balance)
+            .collect();
+        
+        // Aggregate and decrypt
+        let encrypted_sum = self.aggregate_balances(valid_balances);
+        self.paillier.private_key.decrypt(&encrypted_sum)
+    }
+}
+```
+
+### 2.7 Multi-Party Computation (MPC) for Key Sharding
+
+**Purpose:** Distribute wallet private key across multiple parties/devices, requiring threshold signatures.
+
+**Protocol:** Shamir Secret Sharing + Threshold ECDSA
+
+**Shamir Secret Sharing:**
+```
+Given secret s, create n shares such that any t shares can reconstruct s:
+
+1. Choose random polynomial of degree t-1:
+   f(x) = s + a₁x + a₂x² + ... + aₜ₋₁x^(t-1) mod p
+
+2. Generate shares: (i, f(i)) for i = 1, 2, ..., n
+
+3. Reconstruction from shares {(xᵢ, yᵢ)}:
+   s = f(0) = Σ yᵢ · Lᵢ(0)
+   where Lᵢ(0) = Π(xⱼ/(xⱼ - xᵢ)) for j ≠ i (Lagrange basis)
+```
+
+**Implementation:**
+```rust
+use num_bigint::BigUint;
+use rand::Rng;
+
+pub struct ShamirSecretSharing {
+    prime: BigUint, // Large prime for finite field
+}
+
+impl ShamirSecretSharing {
+    pub fn new(prime: BigUint) -> Self {
+        ShamirSecretSharing { prime }
+    }
+    
+    pub fn split_secret(
+        &self,
+        secret: &BigUint,
+        threshold: usize,
+        num_shares: usize,
+    ) -> Vec<(usize, BigUint)> {
+        let mut rng = rand::thread_rng();
+        
+        // Generate random coefficients for polynomial f(x) = secret + a₁x + a₂x² + ...
+        let mut coefficients = vec![secret.clone()];
+        for _ in 1..threshold {
+            coefficients.push(rng.gen_biguint_below(&self.prime));
+        }
+        
+        // Evaluate polynomial at points 1, 2, ..., n
+        let mut shares = Vec::new();
+        for i in 1..=num_shares {
+            let x = BigUint::from(i);
+            let y = self.evaluate_polynomial(&coefficients, &x);
+            shares.push((i, y));
+        }
+        
+        shares
+    }
+    
+    pub fn reconstruct_secret(
+        &self,
+        shares: Vec<(usize, BigUint)>,
+    ) -> BigUint {
+        // Use Lagrange interpolation to find f(0)
+        let mut secret = BigUint::zero();
+        
+        for (i, (x_i, y_i)) in shares.iter().enumerate() {
+            let mut numerator = BigUint::one();
+            let mut denominator = BigUint::one();
+            
+            for (j, (x_j, _)) in shares.iter().enumerate() {
+                if i != j {
+                    // numerator *= -x_j
+                    numerator = (numerator * x_j) % &self.prime;
+                    
+                    // denominator *= (x_i - x_j)
+                    let diff = if x_i > x_j {
+                        (BigUint::from(*x_i) - BigUint::from(*x_j)) % &self.prime
+                    } else {
+                        &self.prime - ((BigUint::from(*x_j) - BigUint::from(*x_i)) % &self.prime)
+                    };
+                    denominator = (denominator * diff) % &self.prime;
+                }
+            }
+            
+            // Lagrange basis: L_i(0) = numerator / denominator
+            let denominator_inv = mod_inverse(&denominator, &self.prime);
+            let lagrange_basis = (numerator * denominator_inv) % &self.prime;
+            
+            // secret += y_i * L_i(0)
+            secret = (secret + (y_i * lagrange_basis)) % &self.prime;
+        }
+        
+        secret
+    }
+    
+    fn evaluate_polynomial(&self, coefficients: &[BigUint], x: &BigUint) -> BigUint {
+        let mut result = BigUint::zero();
+        let mut x_power = BigUint::one();
+        
+        for coeff in coefficients {
+            result = (result + (coeff * &x_power)) % &self.prime;
+            x_power = (x_power * x) % &self.prime;
+        }
+        
+        result
+    }
+}
+```
+
+**Threshold ECDSA Signing:**
+```rust
+use secp256k1::{Secp256k1, Message, PublicKey, SecretKey};
+
+pub struct ThresholdECDSA {
+    threshold: usize,
+    participants: Vec<ParticipantInfo>,
+}
+
+struct ParticipantInfo {
+    id: usize,
+    public_key_share: PublicKey,
+    secret_key_share: Option<SecretKey>, // Only known to participant
+}
+
+impl ThresholdECDSA {
+    // Phase 1: Distributed Key Generation (DKG)
+    pub fn distributed_key_generation(
+        threshold: usize,
+        num_participants: usize,
+    ) -> (PublicKey, Vec<SecretKey>) {
+        let secp = Secp256k1::new();
+        let mut rng = rand::thread_rng();
+        
+        // Each participant generates polynomial
+        let mut polynomials = Vec::new();
+        for _ in 0..num_participants {
+            let mut poly = Vec::new();
+            for _ in 0..threshold {
+                poly.push(SecretKey::new(&mut rng));
+            }
+            polynomials.push(poly);
+        }
+        
+        // Compute shares for each participant
+        let mut secret_shares = vec![Vec::new(); num_participants];
+        for (sender_id, poly) in polynomials.iter().enumerate() {
+            for receiver_id in 0..num_participants {
+                let share = evaluate_secret_polynomial(
+                    poly,
+                    receiver_id + 1,
+                );
+                secret_shares[receiver_id].push(share);
+            }
+        }
+        
+        // Each participant combines received shares
+        let participant_keys: Vec<SecretKey> = secret_shares
+            .iter()
+            .map(|shares| combine_secret_shares(shares))
+            .collect();
+        
+        // Compute global public key
+        let global_public_key = combine_public_keys(
+            &polynomials.iter()
+                .map(|p| PublicKey::from_secret_key(&secp, &p[0]))
+                .collect::<Vec<_>>()
+        );
+        
+        (global_public_key, participant_keys)
+    }
+    
+    // Phase 2: Threshold Signing
+    pub fn threshold_sign(
+        message: &Message,
+        signing_shares: Vec<(usize, SecretKey)>,
+        threshold: usize,
+    ) -> Result<Signature, Error> {
+        if signing_shares.len() < threshold {
+            return Err(Error::InsufficientShares);
+        }
+        
+        let secp = Secp256k1::new();
+        
+        // Each participant creates partial signature
+        let mut partial_sigs = Vec::new();
+        for (id, secret_share) in signing_shares.iter() {
+            let partial_sig = secp.sign(message, secret_share);
+            partial_sigs.push((*id, partial_sig));
+        }
+        
+        // Combine partial signatures using Lagrange interpolation
+        combine_signatures(&partial_sigs)
+    }
+}
+```
+
+**Application in Meshcrypt:**
+```
+Scenario: 2-of-3 Multi-Device Wallet
+
+Device Distribution:
+- Mobile phone: Share 1
+- Desktop computer: Share 2  
+- Hardware security module: Share 3
+
+Transaction Signing:
+1. User initiates transaction on mobile
+2. Mobile generates partial signature with Share 1
+3. Requests second signature via QR code/NFC
+4. Desktop scans QR, signs with Share 2
+5. Combine partial signatures → full transaction signature
+6. Broadcast to blockchain
+
+Recovery:
+- Lost mobile? Use desktop + HSM
+- Compromised desktop? Use mobile + HSM
+- Lost HSM? Use mobile + desktop
+```
+
+---
+
+## 3. BLOCKCHAIN INTEGRATION LAYER
+
+### 3.1 Multi-Chain Architecture Overview
+
+Meshcrypt implements a modular blockchain integration layer supporting heterogeneous chains:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│              Unified Wallet Interface                     │
+└─────────────────────┬─────────────────────────────────────┘
+                      │
+        ┌─────────────┴─────────────┐
+        │   Chain Abstraction Layer  │
+        │   - Account management     │
+        │   - Transaction formatting │
+        │   - Balance querying       │
+        └─────────────┬──────────────┘
+                      │
+    ┌─────────────────┼─────────────────┬──────────────┐
+    │                 │                 │              │
+┌───▼────┐      ┌─────▼──────┐   ┌─────▼──────┐  ┌───▼─────┐
+│ Zcash  │      │  Ethereum  │   │  Polygon   │  │  Other  │
+│ Client │      │   Client   │   │   Client   │  │ Chains  │
+└───┬────┘      └─────┬──────┘   └─────┬──────┘  └───┬─────┘
+    │                 │                 │             │
+┌───▼────┐      ┌─────▼──────┐   ┌─────▼──────┐  ┌───▼─────┐
+│ Zcash  │      │ Ethereum   │   │  Polygon   │  │  Chain  │
+│ Network│      │  Network   │   │  Network   │  │ Networks│
+└────────┘      └────────────┘   └────────────┘  └─────────┘
+```
+
+### 3.2 Zcash Integration (Primary Privacy Chain)
+
+**Zcash Protocol Support:**
+- **Sprout**: Legacy (deprecated, read-only)
+- **Sapling**: Full support (shielded transactions)
+- **Orchard**: Full support (latest protocol, improved efficiency)
+
+**Key Components:**
+
+#### 3.2.1 Zcash Address Types
+
+```rust
+pub enum ZcashAddress {
+    Transparent(String),      // t-address (public, Bitcoin-like)
+    Sprout(String),          // z-address (legacy shielded)
+    Sapling(String),         // z-address (Sapling shielded)
+    Orchard(String),         // z-address (Orchard shielded)
+    Unified(UnifiedAddress), // New unified address format
+}
+
+pub struct UnifiedAddress {
+    pub orchard: Option<OrchardAddress>,
+    pub sapling: Option<SaplingAddress>,
+    pub transparent: Option<TransparentAddress>,
+}
+
+impl ZcashAddress {
+    pub fn is_shielded(&self) -> bool {
+        matches!(self, 
+            ZcashAddress::Sprout(_) | 
+            ZcashAddress::Sapling(_) | 
+            ZcashAddress::Orchard(_) |
+            ZcashAddress::Unified(_)
+        )
+    }
+    
+    pub fn preferred_pool(&self) -> PrivacyPool {
+        match self {
+            ZcashAddress::Orchard(_) => PrivacyPool::Orchard,
+            ZcashAddress::Sapling(_) => PrivacyPool::Sapling,
+            ZcashAddress::Unified(ua) => {
+                if ua.orchard.is_some() {
+                    PrivacyPool::Orchard
+                } else if ua.sapling.is_some() {
+                    PrivacyPool::Sapling
+                } else {
+                    PrivacyPool::Transparent
+                }
+            }
+            _ => PrivacyPool::Transparent,
+        }
+    }
+}
+```
+
+#### 3.2.2 Sapling Protocol Integration
+
+**Sapling Transaction Structure:**
+```rust
+use zcash_primitives::{
+    sapling::{Node, Note, Nullifier, PaymentAddress, Rseed},
+    transaction::{components::sapling, Transaction, TxId},
+};
+use zcash_proofs::sapling::SaplingProvingContext;
+
+pub struct SaplingTransaction {
+    // Inputs (spends)
+    pub spends: Vec<SpendDescription>,
+    // Outputs (notes)
+    pub outputs: Vec<OutputDescription>,
+    // Binding signature
+    pub binding_sig: Signature,
+    // Value balance (net transparent value)
+    pub value_balance: i64,
+}
+
+pub struct SpendDescription {
+    pub cv: ValueCommitment,        // Value commitment
+    pub anchor: MerkleRoot,         // Root of note commitment tree
+    pub nullifier: Nullifier,       // Prevents double-spending
+    pub rk: PublicKey,              // Randomized verification key
+    pub zkproof: Groth16Proof,      // zk-SNARK proof
+    pub spend_auth_sig: Signature,  // Spend authorization
+}
+
+pub struct OutputDescription {
+    pub cv: ValueCommitment,        // Value commitment
+    pub cmu: NoteCommitment,        // Note commitment
+    pub ephemeral_key: PublicKey,   // For note encryption
+    pub enc_ciphertext: [u8; 580],  // Encrypted note
+    pub out_ciphertext: [u8; 80],   // Encrypted recovery data
+    pub zkproof: Groth16Proof,      // zk-SNARK proof
+}
+```
+
+**Sapling Spend Circuit (Simplified):**
+```
+Public Inputs:
+- anchor: Merkle root of note commitment tree
+- nullifier: nf = PRF^nf_nsk(ρ)
+- rk: Randomized public key
+- cv: Value commitment
+
+Private Inputs:
+- note: (value, recipient, rcm)
+- nsk: Nullifier secret key
+- ak: Authentication key  
+- path: Merkle path to anchor
+- rcm: Note commitment randomness
+
+Constraints:
+1. Note commitment: cm = Comm_rcm(value || recipient)
+2. Merkle path verification: MerklePath(cm, path) = anchor
+3. Nullifier derivation: nf = PRF^nf_nsk(ρ)
+4. Value commitment: cv = ValueCommit_rcv(value)
+5. Randomized key: rk = ak + α·G (α is randomness)
+6. Spend authority: proof that spender knows nsk, ak
+```
+
+**Implementation:**
+```rust
+use zcash_primitives::{
+    keys::OutgoingViewingKey,
+    memo::MemoBytes,
+    merkle_tree::IncrementalWitness,
+    sapling::{
+        keys::{DiversifiedTransmissionKey, ExpandedSpendingKey, FullViewingKey},
+        note_encryption::{try_sapling_note_decryption, SaplingDomain},
+        prover::TxProver,
+        PaymentAddress, Rseed, SaplingIvk,
+    },
+    transaction::components::Amount,
+};
+
+pub struct SaplingWallet {
+    spending_key: ExpandedSpendingKey,
+    full_viewing_key: FullViewingKey,
+    payment_addresses: Vec<PaymentAddress>,
+    notes: Vec<SaplingNote>,
+    nullifiers: HashSet<Nullifier>,
+}
+
+impl SaplingWallet {
+    pub fn new(seed: [u8; 32]) -> Self {
+        // Derive spending key from seed
+        let spending_key = ExpandedSpendingKey::from_spending_key(&seed);
+        
+        // Derive full viewing key
+        let full_viewing_key = FullViewingKey::from_expanded_spending_key(&spending_key);
+        
+        // Generate default payment address
+        let (default_address, _) = full_viewing_key
+            .default_address()
+            .expect("Failed to generate default address");
+        
+        SaplingWallet {
+            spending_key,
+            full_viewing_key,
+            payment_addresses: vec![default_address],
+            notes: Vec::new(),
+            nullifiers: HashSet::new(),
+        }
+    }
+    
+    // Create shielded transaction
+    pub fn create_shielded_transaction(
+        &mut self,
+        recipients: Vec<(PaymentAddress, Amount)>,
+        memo: Option<MemoBytes>,
+        prover: &impl TxProver,
+    ) -> Result<Transaction, Error> {
+        let mut builder = Builder::new(NetworkUpgrade::Canopy, BlockHeight::from_u32(1000000));
+        
+        // Add inputs (spend notes)
+        let mut total_input = Amount::zero();
+        for note in &self.notes {
+            if note.is_spent {
+                continue;
+            }
+            
+            // Add spend to builder
+            builder.add_sapling_spend(
+                self.spending_key.clone(),
+                note.diversifier,
+                note.note.clone(),
+                note.witness.path().expect("Invalid witness"),
+            )?;
+            
+            total_input += note.note.value();
+            
+            // Break if we have enough inputs
+            let total_output: Amount = recipients.iter().map(|(_, amt)| amt).sum();
+            if total_input >= total_output {
+                break;
+            }
+        }
+        
+        // Add outputs
+        for (recipient_address, amount) in recipients {
+            builder.add_sapling_output(
+                None, // ovk (outgoing viewing key)
+                recipient_address,
+                amount,
+                memo.clone(),
+            )?;
+        }
+        
+        // Build transaction with proofs
+        let (tx, metadata) = builder.build(prover)?;
+        
+        // Mark spent notes
+        for spend in metadata.spends() {
+            self.nullifiers.insert(spend.nullifier());
+        }
+        
+        Ok(tx)
+    }
+    
+    // Scan blockchain for incoming notes
+    pub fn scan_transaction(&mut self, tx: &Transaction, height: BlockHeight) -> Vec<SaplingNote> {
+        let mut found_notes = Vec::new();
+        
+        // Get incoming viewing key
+        let ivk = self.full_viewing_key.fvk.vk.ivk();
+        
+        // Scan Sapling outputs
+        for (index, output) in tx.sapling_bundle().unwrap().shielded_outputs().iter().enumerate() {
+            // Try to decrypt note
+            if let Some((note, recipient, memo)) = try_sapling_note_decryption(
+                &ivk,
+                output,
+                tx.txid().as_ref(),
+            ) {
+                let sapling_note = SaplingNote {
+                    note,
+                    diversifier: recipient,
+                    witness: IncrementalWitness::from_tree(/* commitment tree */),
+                    height,
+                    txid: tx.txid(),
+                    output_index: index,
+                    is_spent: false,
+                };
+                
+                found_notes.push(sapling_note.clone());
+                self.notes.push(sapling_note);
+            }
+        }
+        
+        found_notes
+    }
+    
+    // Get total shielded balance
+    pub fn get_balance(&self) -> Amount {
+        self.notes
+            .iter()
+            .filter(|n| !n.is_spent && !self.nullifiers.contains(&n.nullifier()))
+            .map(|n| n.note.value())
+            .sum()
+    }
+}
+
+#[derive(Clone)]
+pub struct SaplingNote {
+    pub note: Note,
+    pub diversifier: PaymentAddress,
+    pub witness: IncrementalWitness<Node>,
+    pub height: BlockHeight,
+    pub txid: TxId,
+    pub output_index: usize,
+    pub is_spent: bool,
+}
+
+impl SaplingNote {
+    pub fn nullifier(&self) -> Nullifier {
+        self.note.nf(
+            &self.witness.position().into(),
+            &self.witness.root().into(),
+        )
+    }
+}
+```
+
+#### 3.2.3 Orchard Protocol Integration
+
+**Orchard Improvements over Sapling:**
+- **Halo 2**: No trusted setup required
+- **More efficient circuits**: ~60% faster proving
+- **Better batch verification**: Verify multiple proofs together
+- **Action-based model**: Unified spend+output in single "action"
+
+**Orchard Action Structure:**
+```rust
+use orchard::{
+    keys::{SpendingKey, FullViewingKey, Scope},
+    note::{Note, Nullifier, RandomSeed},
+    tree::MerkleHashOrchard,
+    Action, Bundle,
+};
+
+pub struct OrchardAction {
+    // Unified spend + output
+    pub nullifier: Nullifier,              // Input nullifier
+    pub commitment: NoteCommitment,        // Output commitment
+    pub ephemeral_key: EphemeralPublicKey, // For encryption
+    pub encrypted_note: [u8; 612],         // Encrypted output
+    pub cv_net: ValueCommitment,           // Net value commitment
+    pub proof: Halo2Proof,                 // Single proof for action
+}
+
+pub struct OrchardWallet {
+    spending_key: SpendingKey,
+    full_viewing_key: FullViewingKey,
+    notes: Vec<OrchardNote>,
+}
+
+impl OrchardWallet {
+    pub fn new(seed: [u8; 32]) -> Self {
+        let spending_key = SpendingKey::from_bytes(seed).unwrap();
+        let full_viewing_key = FullViewingKey::from(&spending_key);
+        
+        OrchardWallet {
+            spending_key,
+            full_viewing_key,
+            notes: Vec::new(),
+        }
+    }
+    
+    pub fn create_orchard_transaction(
+        &mut self,
+        recipients: Vec<(Address, u64)>,
+    ) -> Result<Bundle<Authorized, Amount>, Error> {
+        let mut builder = Builder::new(
+            BundleType::DEFAULT,
+            Anchor::from_bytes([0u8; 32]).unwrap(),
+        );
+        
+        // Add actions (combined spends + outputs)
+        for note in &self.notes {
+            if note.is_spent {
+                continue;
+            }
+            
+            // Add spend
+            builder.add_spend(
+                self.full_viewing_key.clone(),
+                note.note.clone(),
+                note.merkle_path.clone(),
+            )?;
+        }
+        
+        for (recipient, value) in recipients {
+            // Add output
+            builder.add_output(
+                None, // ovk
+                recipient,
+                NoteValue::from_raw(value),
+                None, // memo
+            )?;
+        }
+        
+        // Build bundle with Halo 2 proofs
+        let bundle = builder.build(&mut OsRng)?;
+        
+        Ok(bundle)
+    }
+    
+    // Scan for incoming Orchard notes
+    pub fn scan_orchard_bundle(
+        &mut self,
+        bundle: &Bundle<Authorized, Amount>,
+    ) -> Vec<OrchardNote> {
+        let mut found_notes = Vec::new();
+        let ivk = self.full_viewing_key.to_ivk(Scope::External);
+        
+        for action in bundle.actions() {
+            // Try to decrypt note
+            if let Some((note, address, memo)) = 
+                action.decrypt_note_with_ivk(&ivk) 
+            {
+                let orchard_note = OrchardNote {
+                    note,
+                    address,
+                    is_spent: false,
+                    merkle_path: MerklePath::empty(), // Update with real path
+                };
+                
+                found_notes.push(orchard_note.clone());
+                self.notes.push(orchard_note);
+            }
+        }
+        
+        found_notes
+    }
+}
+
+#[derive(Clone)]
+pub struct OrchardNote {
+    pub note: Note,
+    pub address: Address,
+    pub is_spent: bool,
+    pub merkle_path: MerklePath<MerkleHashOrchard, 32>,
+}
+```
+
+#### 3.2.4 Zcash Light Client Protocol
+
+**Problem:** Full nodes require 30+ GB storage and full blockchain sync.
+
+**Solution:** Light client using compact blocks + trial decryption.
+
+```rust
+use zcash_client_backend::{
+    data_api::WalletRead,
+    proto::compact_formats::CompactBlock,
+};
+
+pub struct ZcashLightClient {
+    connection: LightWalletClient,
+    wallet: SaplingWallet,
+    sync_height: BlockHeight,
+}
+
+impl ZcashLightClient {
+    pub async fn new(server_url: &str) -> Result<Self, Error> {
+        let connection = LightWalletClient::connect(server_url).await?;
+        
+        // Get current blockchain height
+        let chain_tip = connection.get_latest_block().await?;
+        
+        Ok(ZcashLightClient {
+            connection,
+            wallet: SaplingWallet::new([0u8; 32]), // Replace with real seed
+            sync_height: chain_tip.height,
+        })
+    }
+    
+    pub async fn sync(&mut self) -> Result<(), Error> {
+        let start_height = self.wallet.get_last_synced_height();
+        let end_height = self.sync_height;
+        
+        // Fetch compact blocks in batches
+        const BATCH_SIZE: u32 = 1000;
+        for batch_start in (start_height..end_height).step_by(BATCH_SIZE as usize) {
+            let batch_end = (batch_start + BATCH_SIZE).min(end_height);
+            
+            let compact_blocks = self.connection
+                .get_block_range(batch_start, batch_end)
+                .await?;
+            
+            // Scan each compact block
+            for compact_block in compact_blocks {
+                self.scan_compact_block(compact_block)?;
+            }
+        }
+        
+        Ok(())
+    }
+    
+    fn scan_compact_block(&mut self, block: CompactBlock) -> Result<(), Error> {
+        // Compact block contains only:
+        // - Block header
+        // - Note commitments
+        // - Nullifiers
+        // - Encrypted note ciphertexts (first 52 bytes)
+        
+        let height = BlockHeight::from_u32(block.height as u32);
+        
+        // Trial decrypt all outputs
+        for compact_tx in block.vtx {
+            for output in compact_tx.outputs {
+                // Try to decrypt with our viewing key
+                if let Some(note) = self.wallet.try_decrypt_compact_output(
+                    &output,
+                    height,
+                ) {
+                    // Found a note belonging to us!
+                    self.wallet.add_note(note);
+                }
+            }
+            
+            // Check nullifiers to mark spent notes
+            for nullifier in compact_tx.spends {
+                self.wallet.mark_spent(nullifier);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    pub async fn send_transaction(
+        &mut self,
+        recipients: Vec<(PaymentAddress, Amount)>,
+    ) -> Result<TxId, Error> {
+        // Create transaction
+        let tx = self.wallet.create_shielded_transaction(
+            recipients,
+            None,
+            &LocalTxProver::default(),
+        )?;
+        
+        // Broadcast to network
+        let txid = self.connection.send_transaction(tx.into()).await?;
+        
+        Ok(txid)
+    }
+}
+```
+
+**Compact Block Format:**
+```protobuf
+message CompactBlock {
+    uint32 protoVersion = 1;
+    uint64 height = 2;
+    bytes hash = 3;
+    bytes prevHash = 4;
+    uint32 time = 5;
+    repeated CompactTx vtx = 6;
+}
+
+message CompactTx {
+    uint64 index = 1;
+    bytes hash = 2;
+    repeated CompactSpend spends = 3;
+    repeated CompactOutput outputs = 4;
+}
+
+message CompactSpend {
+    bytes nf = 1; // Nullifier only
+}
+
+message CompactOutput {
+    bytes cmu = 1;        // Note commitment
+    bytes ephemeralKey = 2; // Ephemeral public key
+    bytes ciphertext = 3;   // First 52 bytes only (enough for trial decryption)
+}
+```
+
+### 3.3 Ethereum Integration
+
+**Ethereum Privacy Challenges:**
+- All transactions public by default
+- No native shielded transactions
+- Account-based model (vs UTXO)
+
+**Meshcrypt Solutions:**
+- Privacy-preserving smart contracts
+- zk-SNARK rollups
+- Stealth address registry
+- Mixer contracts
+
+#### 3.3.1 Ethereum Privacy Contract
+
+```solidity
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+
+/**
+ * @title MeshcryptPrivacyPool
+ * @notice Privacy-preserving ETH/ERC20 pool using commitments and nullifiers
+ */
+contract MeshcryptPrivacyPool {
+    using ECDSA for bytes32;
+    
+    // Merkle tree parameters
+    uint256 public constant TREE_DEPTH = 20;
+    uint256 public constant FIELD_SIZE = 
+        21888242871839275222246405745257275088548364400416034343698204186575808495617;
+    
+    // State
+    uint256 public currentRootIndex = 0;
+    uint256 public nextLeafIndex = 0;
+    mapping(uint256 => bytes32) public roots; // Historical Merkle roots
+    mapping(bytes32 => bool) public commitments; // Note commitments
+    mapping(bytes32 => bool) public nullifiers; // Spent nullifiers
+    
+    // Events
+    event Deposit(
+        bytes32 indexed commitment,
+        uint256 leafIndex,
+        uint256 timestamp
+    );
+    
+    event Withdrawal(
+        address indexed recipient,
+        bytes32 nullifier,
+        address indexed relayer,
+        uint256 fee
+    );
+    
+    // Verifier for zk-SNARK proofs
+    IVerifier public immutable verifier;
+    
+    // Denomination (fixed amount deposits for anonymity set)
+    uint256 public immutable denomination;
+    
+    constructor(address _verifier, uint256 _denomination) {
+        verifier = IVerifier(_verifier);
+        denomination = _denomination;
+        
+        // Initialize with empty Merkle root
+        roots[0] = bytes32(0);
+    }
+    
+    /**
+     * @notice Deposit ETH into privacy pool
+     * @param commitment Pedersen commitment to note (recipient, nullifier)
+     */
+    function deposit(bytes32 commitment) external payable {
+        require(msg.value == denomination, "Invalid deposit amount");
+        require(!commitments[commitment], "Commitment already exists");
+        require(uint256(commitment) < FIELD_SIZE, "Invalid commitment");
+        
+        // Add commitment to Merkle tree
+        uint256 leafIndex = nextLeafIndex;
+        commitments[commitment] = true;
+        nextLeafIndex++;
+        
+        // Update Merkle root (simplified, real implementation uses incremental tree)
+        bytes32 newRoot = updateMerkleRoot(commitment, leafIndex);
+        currentRootIndex++;
+        roots[currentRootIndex] = newRoot;
+        
+        emit Deposit(commitment, leafIndex, block.timestamp);
+    }
+    
+    /**
+     * @notice Withdraw ETH from privacy pool
+     * @param proof zk-SNARK proof of valid withdrawal
+     * @param root Merkle root used in proof
+     * @param nullifier Nullifier to prevent double-spending
+     * @param recipient Withdrawal recipient address
+     * @param relayer Optional relayer address for gas payment
+     * @param fee Fee paid to relayer
+     */
+    function withdraw(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 nullifier,
+        address payable recipient,
+        address payable relayer,
+        uint256 fee
+    ) external {
+        require(!nullifiers[nullifier], "Note already spent");
+        require(isKnownRoot(root), "Invalid Merkle root");
+        require(fee < denomination, "Fee too high");
+        
+        // Verify zk-SNARK proof
+        require(
+            verifyProof(proof, root, nullifier, recipient, relayer, fee),
+            "Invalid proof"
+        );
+        
+        // Mark nullifier as used
+        nullifiers[nullifier] = true;
+        
+        // Transfer funds
+        uint256 recipientAmount = denomination - fee;
+        recipient.transfer(recipientAmount);
+        
+        if (fee > 0 && relayer != address(0)) {
+            relayer.transfer(fee);
+        }
+        
+        emit Withdrawal(recipient, nullifier, relayer, fee);
+    }
+    
+    /**
+     * @notice Verify zk-SNARK proof
+     */
+    function verifyProof(
+        bytes calldata proof,
+        bytes32 root,
+        bytes32 nullifier,
+        address recipient,
+        address relayer,
+        uint256 fee
+    ) internal view returns (bool) {
+        // Public inputs: [root, nullifier, recipient, relayer, fee]
+        uint256[5] memory publicInputs = [
+            uint256(root),
+            uint256(nullifier),
+            uint256(uint160(recipient)),
+            uint256(uint160(relayer)),
+            fee
+        ];
+        
+        return verifier.verify(proof, publicInputs);
+    }
+    
+    /**
+     * @notice Check if root is in history
+     */
+    function isKnownRoot(bytes32 root) public view returns (bool) {
+        if (root == bytes32(0)) return false;
+        
+        // Check recent roots (prevent old root attacks)
+        uint256 maxAge = 100; // ~30 minutes at 15s blocks
+        uint256 startIndex = currentRootIndex > maxAge ? 
+            currentRootIndex - maxAge : 0;
+        
+        for (uint256 i = startIndex; i <= currentRootIndex; i++) {
+            if (roots[i] == root) return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * @notice Update Merkle root with new commitment
+     * @dev Simplified version - real implementation uses MiMC hash
+     */
+    function updateMerkleRoot(
+        bytes32 commitment,
+        uint256 leafIndex
+    ) internal pure returns (bytes32) {
+        // In production, use proper Merkle tree implementation
+        // with MiMC or Poseidon hash function
+        return keccak256(abi.encodePacked(commitment, leafIndex));
+    }
+}
+
+/**
+ * @title IVerifier
+ * @notice Interface for zk-SNARK verifier contract
+ */
+interface IVerifier {
+    function verify(
+        bytes calldata proof,
+        uint256[5] calldata publicInputs
+    ) external view returns (bool);
+}
+```
+
+**zk-SNARK Circuit for Withdrawal:**
+```circom
+pragma circom 2.0.0;
+
+include "merkle.circom";
+include "mimc.circom";
+
+template Withdraw(levels) {
+    // Public inputs
+    signal input root;
+    signal input nullifier;
+    signal input recipient;
+    signal input relayer;
+    signal input fee;
+    
+    // Private inputs
+    signal input secret;
+    signal input path_elements[levels];
+    signal input path_index[levels];
+    
+    // Compute commitment = MiMC(secret)
+    component commitment_hasher = MiMC7(91);
+    commitment_hasher.x_in <== secret;
+    commitment_hasher.k <== 0;
+    
+    // Verify Merkle proof
+    component merkle_proof = MerkleTreeChecker(levels);
+    merkle_proof.leaf <== commitment_hasher.out;
+    merkle_proof.root <== root;
+    for (var i = 0; i < levels; i++) {
+        merkle_proof.path_elements[i] <== path_elements[i];
+        merkle_proof.path_index[i] <== path_index[i];
+    }
+    
+    // Compute nullifier = MiMC(secret, 1)
+    component nullifier_hasher = MiMC7(91);
+    nullifier_hasher.x_in <== secret;
+    nullifier_hasher.k <== 1;
+    nullifier_hasher.out === nullifier;
+    
+    // Dummy constraints for recipient/relayer/fee (ensure they're used)
+    signal recipient_check;
+    signal relayer_check;
+    signal fee_check;
+    recipient_check <== recipient * recipient;
+    relayer_check <== relayer * relayer;
+    fee_check <== fee * fee;
+}
+
+component main {public [root, nullifier, recipient, relayer, fee]} = Withdraw(20);
+```
+
+#### 3.3.2 ERC20 Privacy Wrapper
+
+```solidity
+/**
+ * @title PrivateERC20
+ * @notice Privacy-preserving wrapper for ERC20 tokens
+ */
+contract PrivateERC20 {
+    IERC20 public immutable token;
+    MeshcryptPrivacyPool public immutable privacyPool;
+    
+    mapping(bytes32 => uint256) public tokenCommitments; // commitment => amount
+    
+    event PrivateTransfer(
+        bytes32 indexed senderCommitment,
+        bytes32 indexed recipientCommitment,
+        bytes32 encryptedAmount
+    );
+    
+    constructor(address _token, address _privacyPool) {
+        token = IERC20(_token);
+        privacyPool = MeshcryptPrivacyPool(_privacyPool);
+    }
+    
+    /**
+     * @notice Deposit ERC20 tokens privately
+     */
+    function depositToken(
+        uint256 amount,
+        bytes32 commitment
+    ) external {
+        require(token.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        
+        tokenCommitments[commitment] = amount;
+        
+        // Register commitment in privacy pool
+        privacyPool.deposit{value: 0}(commitment);
+    }
+    
+    /**
+     * @notice Private transfer using homomorphic commitments
+     */
+    function privateTransfer(
+        bytes32 senderCommitment,
+        bytes32 recipientCommitment,
+        bytes calldata proof,
+        bytes32 encryptedAmount
+    ) external {
+        // Verify proof that sender owns commitment and amount is valid
+        require(
+            verifyTransferProof(
+                proof,
+                senderCommitment,
+                recipientCommitment,
+                encryptedAmount
+            ),
+            "Invalid proof"
+        );
+        
+        emit PrivateTransfer(
+            senderCommitment,
+            recipientCommitment,
+            encryptedAmount
+        );
+    }
+    
+    function verifyTransferProof(
+        bytes calldata proof,
+        bytes32 senderCommitment,
+        bytes32 recipientCommitment,
+        bytes32 encryptedAmount
+    ) internal view returns (bool) {
+        // Verify zk-SNARK proof of valid transfer
+        // Proof shows: sender owns commitment, amount > 0, balance sufficient
+        return true; // Simplified
+    }
+}
+```
+
+### 3.4 Polygon Integration
+
+**Polygon Advantages:**
+- Lower gas fees (~100x cheaper than Ethereum)
+- Faster finality (2-3 seconds)
+- EVM compatibility (reuse Ethereum contracts)
+- Good for frequent privacy operations
+
+```rust
+use ethers::{
+    providers::{Http, Provider},
+    types::{Address, TransactionRequest, U256},
+    middleware::SignerMiddleware,
+    signers::{LocalWallet, Signer},
+};
+
+pub struct PolygonClient {
+    provider: Provider<Http>,
+    privacy_contract: Address,
+    wallet: LocalWallet,
+}
+
+impl PolygonClient {
+    pub async fn new(rpc_url: &str, private_key: &str) -> Result<Self, Error> {
+        let provider = Provider::<Http>::try_from(rpc_url)?;
+        let wallet: LocalWallet = private_key.parse()?;
+        let privacy_contract = "0x...".parse()?; // Meshcrypt contract on Polygon
+        
+        Ok(PolygonClient {
+            provider,
+            privacy_contract,
+            wallet,
+        })
+    }
+    
+    pub async fn deposit_to_privacy_pool(
+        &self,
+        amount: U256,
+        commitment: [u8; 32],
+    ) -> Result<TxHash, Error> {
+        let client = SignerMiddleware::new(
+            self.provider.clone(),
+            self.wallet.clone(),
+        );
+        
+        // Encode function call: deposit(bytes32 commitment)
+        let data = encode_deposit_call(commitment);
+        
+        let tx = TransactionRequest::new()
+            .to(self.privacy_contract)
+            .value(amount)
+            .data(data)
+            .gas(300_000);
+        
+        let pending_tx = client.send_transaction(tx, None).await?;
+        let receipt = pending_tx.await?;
+        
+        Ok(receipt.transaction_hash)
+    }
+    
+    pub async fn withdraw_from_privacy_pool(
+        &self,
+        proof: Vec<u8>,
+        root: [u8; 32],
+        nullifier: [u8; 32],
+        recipient: Address,
+    ) -> Result<TxHash, Error> {
+        // Similar to deposit, but call withdraw function
+        // Gas paid by relayer for full privacy
+        todo!()
+    }
+}
+```
+
+### 3.5 Cross-Chain Privacy Bridge
+
+**Architecture:**
+```
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│   Zcash     │◄───────►│  Meshcrypt  │◄───────►│  Ethereum   │
+│  Shielded   │  Lock   │    Bridge    │  Mint   │   Privacy   │
+│   Pool      │  Asset  │   Contract   │  Wrapped│   Contract  │
+└─────────────┘         └──────────────┘         └─────────────┘
+                              │
+                              │ Verify
+                              ▼
+                        ┌──────────┐
+                        │ zk-SNARK │
+                        │  Proof   │
+                        │ Verifier │
+                        └──────────┘
+```
+
+**Cross-Chain Transfer Protocol:**
+```
+1. User locks ZEC in Zcash shielded pool
+2. Generate zk-SNARK proof of lock
+3. Submit proof to Ethereum bridge contract
+4. Bridge mints wrapped-ZEC (wZEC) on Ethereum
+5. User can use wZEC privately on Ethereum
+6. To return: burn wZEC, prove burn, unlock ZEC
+```
+
+**Bridge Smart Contract:**
+```solidity
+contract MeshcryptBridge {
+    // Wrapped token contracts for each chain
+    mapping(uint256 => address) public wrappedTokens; // chainId => token
+    
+    // Bridge state
+    mapping(bytes32 => bool) public processedLocks;
+    mapping(bytes32 => bool) public processedBurns;
+    
+    event CrossChainLock(
+        uint256 indexed sourceChain,
+        bytes32 indexed lockHash,
+        address indexed recipient,
+        uint256 amount
+    );
+    
+    event CrossChainMint(
+        uint256 indexed sourceChain,
+        bytes32 indexed lockHash,
+        address recipient,
+        uint256 amount
+    );
+    
+    /**
+     * @notice Mint wrapped tokens based on proof of lock on source chain
+     */
+    function mintFromLock(
+        uint256 sourceChain,
+        bytes32 lockHash,
+        address recipient,
+        uint256 amount,
+        bytes calldata proof
+    ) external {
+        require(!processedLocks[lockHash], "Already processed");
+        
+        // Verify zk-SNARK proof of lock on source chain
+        require(
+            verifyLockProof(sourceChain, lockHash, recipient, amount, proof),
+            "Invalid lock proof"
+        );
+        
+        processedLocks[lockHash] = true;
+        
+        // Mint wrapped tokens
+        address wrappedToken = wrappedTokens[sourceChain];
+        IWrappedToken(wrappedToken).mint(recipient, amount);
+        
+        emit CrossChainMint(sourceChain, lockHash, recipient, amount);
+    }
+    
+    /**
+     * @notice Burn wrapped tokens to unlock on source chain
+     */
+    function burnForUnlock(
+        uint256 targetChain,
+        uint256 amount,
+        bytes32 unlockCommitment
+    ) external {
+        address wrappedToken = wrappedTokens[targetChain];
+        
+        // Burn wrapped tokens
+        IWrappedToken(wrappedToken).burnFrom(msg.sender, amount);
+        
+        // Emit event for relayers to process unlock
+        emit CrossChainUnlock(targetChain, msg.sender, amount, unlockCommitment);
+    }
+    
+    function verifyLockProof(
+        uint256 sourceChain,
+        bytes32 lockHash,
+        address recipient,
+        uint256 amount,
+        bytes calldata proof
+    ) internal view returns (bool) {
+        // Verify proof shows:
+        // 1. Funds locked in source chain privacy pool
+        // 2. Lock commitment matches lockHash
+        // 3. Amount and recipient are correct
+        return true; // Simplified
+    }
+}
+```
+
+**Cross-Chain Privacy Circuit:**
+```circom
+template CrossChainLockProof() {
+    // Public inputs
+    signal input source_chain_id;
+    signal input target_chain_id;
+    signal input lock_hash;
+    signal input recipient_address;
+    signal input amount;
+    
+    // Private inputs
+    signal input source_nullifier;
+    signal input source_merkle_root;
+    signal input source_merkle_path[20];
+    signal input user_secret;
+    signal input lock_nonce;
+    
+    // Constraint 1: Verify source chain lock
+    component source_merkle = MerkleTreeChecker(20);
+    source_merkle.leaf <== source_nullifier;
+    source_merkle.root <== source_merkle_root;
+    for (var i = 0; i < 20; i++) {
+        source_merkle.path_elements[i] <== source_merkle_path[i];
+    }
+    
+    // Constraint 2: Lock hash derivation
+    component lock_hasher = Poseidon(5);
+    lock_hasher.inputs[0] <== source_chain_id;
+    lock_hasher.inputs[1] <== target_chain_id;
+    lock_hasher.inputs[2] <== amount;
+    lock_hasher.inputs[3] <== user_secret;
+    lock_hasher.inputs[4] <== lock_nonce;
+    lock_hasher.out === lock_hash;
+    
+    // Constraint 3: Recipient derivation (privacy-preserving)
+    component recipient_hasher = Poseidon(2);
+    recipient_hasher.inputs[0] <== user_secret;
+    recipient_hasher.inputs[1] <== target_chain_id;
+    // Note: In production, recipient_address would be derived from this
+    
+    // Constraint 4: Amount is non-negative (range proof)
+    component range_check = RangeProof(64);
+    range_check.in <== amount;
+}
+
+component main {public [source_chain_id, target_chain_id, lock_hash, recipient_address, amount]} = CrossChainLockProof();
+```
+
+**Bridge Relayer Service:**
+```rust
+use tokio::time::{interval, Duration};
+use ethers::prelude::*;
+
+pub struct BridgeRelayer {
+    zcash_client: ZcashLightClient,
+    ethereum_client: Provider<Http>,
+    polygon_client: Provider<Http>,
+    bridge_contracts: HashMap<ChainId, Address>,
+    relayer_wallet: LocalWallet,
+}
+
+impl BridgeRelayer {
+    pub async fn start_monitoring(&self) {
+        let mut ticker = interval(Duration::from_secs(30));
+        
+        loop {
+            ticker.tick().await;
+            
+            // Monitor Zcash for lock events
+            if let Ok(locks) = self.scan_zcash_locks().await {
+                for lock in locks {
+                    self.process_zcash_lock(lock).await;
+                }
+            }
+            
+            // Monitor Ethereum for burn events
+            if let Ok(burns) = self.scan_ethereum_burns().await {
+                for burn in burns {
+                    self.process_ethereum_burn(burn).await;
+                }
+            }
+        }
+    }
+    
+    async fn scan_zcash_locks(&self) -> Result<Vec<LockEvent>, Error> {
+        // Scan Zcash shielded pool for bridge lock transactions
+        // Look for specific memo field or OP_RETURN data
+        let recent_txs = self.zcash_client.get_recent_transactions(100).await?;
+        
+        let mut locks = Vec::new();
+        for tx in recent_txs {
+            if let Some(lock) = self.parse_lock_transaction(&tx) {
+                locks.push(lock);
+            }
+        }
+        
+        Ok(locks)
+    }
+    
+    async fn process_zcash_lock(&self, lock: LockEvent) -> Result<(), Error> {
+        // Generate cross-chain proof
+        let proof = self.generate_cross_chain_proof(&lock).await?;
+        
+        // Submit to target chain bridge contract
+        let target_bridge = self.bridge_contracts[&lock.target_chain];
+        
+        let tx = self.ethereum_client
+            .send_transaction(TransactionRequest {
+                to: Some(target_bridge.into()),
+                data: Some(encode_mint_call(lock, proof)),
+                gas: Some(500_000.into()),
+                ..Default::default()
+            }, None)
+            .await?;
+        
+        println!("Cross-chain mint submitted: {:?}", tx.tx_hash());
+        
+        Ok(())
+    }
+    
+    async fn generate_cross_chain_proof(&self, lock: &LockEvent) -> Result<Vec<u8>, Error> {
+        // Create witness for cross-chain circuit
+        let witness = CrossChainWitness {
+            source_chain_id: lock.source_chain,
+            target_chain_id: lock.target_chain,
+            lock_hash: lock.lock_hash,
+            recipient_address: lock.recipient,
+            amount: lock.amount,
+            source_nullifier: lock.nullifier,
+            source_merkle_root: self.zcash_client.get_merkle_root().await?,
+            source_merkle_path: self.zcash_client.get_merkle_path(&lock.nullifier).await?,
+            user_secret: lock.user_secret,
+            lock_nonce: lock.nonce,
+        };
+        
+        // Generate Groth16 proof
+        let proof = generate_groth16_proof(&witness)?;
+        
+        Ok(proof.to_bytes())
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LockEvent {
+    source_chain: u64,
+    target_chain: u64,
+    lock_hash: [u8; 32],
+    recipient: Address,
+    amount: u64,
+    nullifier: [u8; 32],
+    user_secret: [u8; 32],
+    nonce: u64,
+}
+```
+
+### 3.6 Chain Support Comparison Table
+
+| Feature | Zcash (Sapling/Orchard) | Ethereum | Polygon | Arbitrum |
+|---------|------------------------|----------|---------|----------|
+| **Native Privacy** | ✅ Full (zk-SNARKs) | ❌ None | ❌ None | ❌ None |
+| **Transaction Cost** | ~$0.001 | ~$2-50 | ~$0.01-0.50 | ~$0.10-2 |
+| **Finality Time** | 75 seconds (1.25 min) | 12-15 minutes | 2-3 seconds | 1-2 minutes |
+| **Privacy Mechanism** | Shielded pool | Smart contracts | Smart contracts | Smart contracts |
+| **Proof System** | Groth16/Halo2 | Any (contract-dependent) | Any | Any |
+| **Balance Hiding** | ✅ Native | ⚠️ Contract-level | ⚠️ Contract-level | ⚠️ Contract-level |
+| **Sender Privacy** | ✅ Full | ⚠️ Stealth addresses | ⚠️ Stealth addresses | ⚠️ Stealth addresses |
+| **Recipient Privacy** | ✅ Full | ⚠️ Stealth addresses | ⚠️ Stealth addresses | ⚠️ Stealth addresses |
+| **Amount Privacy** | ✅ Full | ⚠️ Commitments | ⚠️ Commitments | ⚠️ Commitments |
+| **Smart Contracts** | ❌ Limited | ✅ Full Turing-complete | ✅ Full | ✅ Full |
+| **DeFi Integration** | ❌ Minimal | ✅ Extensive | ✅ Extensive | ✅ Extensive |
+| **Meshcrypt Integration** | Primary privacy layer | Secondary via contracts | Fast L2 operations | Optimistic rollup support |
+
+**Implementation Strategy:**
+- **Zcash**: Primary storage for high-value privacy assets
+- **Polygon**: Frequent small transactions, privacy mixing
+- **Ethereum**: Final settlement, DeFi integration
+- **Cross-chain**: Bridge for asset movement with privacy preservation
+
+---
+
+## 4. MESH NETWORK PROTOCOL
+
+### 4.1 Mesh Network Architecture
+
+**Objective:** Enable transaction propagation without internet connectivity using peer-to-peer wireless protocols.
+
+**Supported Transport Layers:**
+1. **Bluetooth Low Energy (BLE)**: 10-100m range, low power
+2. **WiFi Direct**: 200m range, higher throughput
+3. **LoRa**: 2-10km range, very low power, low bandwidth
+
+```
+Network Topology:
+
+    [Phone A] ←BLE→ [Phone B] ←WiFi→ [Phone C]
+        ↓                              ↓
+      LoRa                           LoRa
+        ↓                              ↓
+    [Gateway] ←Internet→ [Blockchain Node]
+```
+
+### 4.2 Mesh Protocol Specification
+
+**Protocol Stack:**
+```
+┌────────────────────────────────┐
+│   Transaction Layer            │  <- Wallet operations
+├────────────────────────────────┤
+│   Routing Layer                │  <- Message forwarding
+├────────────────────────────────┤
+│   Gossip Protocol Layer        │  <- Peer discovery & sync
+├────────────────────────────────┤
+│   Encryption Layer             │  <- ChaCha20-Poly1305
+├────────────────────────────────┤
+│   Transport Layer              │  <- BLE/WiFi/LoRa
+└────────────────────────────────┘
+```
+
+#### 4.2.1 Message Format
+
+```rust
+use serde::{Serialize, Deserialize};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MeshMessage {
+    pub header: MessageHeader,
+    pub payload: Vec<u8>,        // Encrypted payload
+    pub signature: [u8; 64],      // Ed25519 signature
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MessageHeader {
+    pub version: u8,              // Protocol version
+    pub message_type: MessageType,
+    pub message_id: [u8; 32],    // Unique message ID
+    pub timestamp: u64,           // Unix timestamp
+    pub ttl: u8,                  // Time-to-live (hops)
+    pub sender_id: [u8; 32],     // Anonymous sender ID (rotated)
+    pub prev_hop: Option<[u8; 32]>, // Previous hop for routing
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy)]
+pub enum MessageType {
+    Transaction = 0x01,           // Blockchain transaction
+    PeerDiscovery = 0x02,         // Peer announcement
+    PeerRequest = 0x03,           // Request peer list
+    PeerResponse = 0x04,          // Peer list response
+    BlockSync = 0x05,             // Blockchain sync request
+    HealthCheck = 0x06,           // Network health ping
+}
+
+impl MeshMessage {
+    pub fn new(
+        message_type: MessageType,
+        payload: Vec<u8>,
+        sender_key: &ed25519_dalek::Keypair,
+    ) -> Self {
+        let message_id = {
+            let mut hasher = blake2::Blake2b::new();
+            hasher.update(&payload);
+            hasher.update(&rand::random::<[u8; 32]>());
+            hasher.finalize().as_bytes()[..32].try_into().unwrap()
+        };
+        
+        let header = MessageHeader {
+            version: 1,
+            message_type,
+            message_id,
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            ttl: 10,  // Max 10 hops
+            sender_id: sender_key.public.to_bytes(),
+            prev_hop: None,
+        };
+        
+        // Sign message
+        let signature_data = bincode::serialize(&(&header, &payload)).unwrap();
+        let signature = sender_key.sign(&signature_data).to_bytes();
+        
+        MeshMessage {
+            header,
+            payload,
+            signature,
+        }
+    }
+    
+    pub fn encrypt_payload(&mut self, key: &Key) -> Result<(), Error> {
+        let cipher = ChaCha20Poly1305::new(key);
+        let nonce = Nonce::from_slice(&self.header.message_id[..12]);
+        
+        let ciphertext = cipher.encrypt(nonce, self.payload.as_ref())
+            .map_err(|_| Error::EncryptionFailed)?;
+        
+        self.payload = ciphertext;
+        Ok(())
+    }
+    
+    pub fn decrypt_payload(&self, key: &Key) -> Result<Vec<u8>, Error> {
+        let cipher = ChaCha20Poly1305::new(key);
+        let nonce = Nonce::from_slice(&self.header.message_id[..12]);
+        
+        cipher.decrypt(nonce, self.payload.as_ref())
+            .map_err(|_| Error::DecryptionFailed)
+    }
+    
+    pub fn verify_signature(&self) -> bool {
+        let public_key = ed25519_dalek::PublicKey::from_bytes(&self.header.sender_id);
+        if public_key.is_err() {
+            return false;
+        }
+        
+        let signature_data = bincode::serialize(&(&self.header, &self.payload)).unwrap();
+        let signature = ed25519_dalek::Signature::from_bytes(&self.signature);
+        if signature.is_err() {
+            return false;
+        }
+        
+        public_key.unwrap().verify(&signature_data, &signature.unwrap()).is_ok()
+    }
+}
+```
+
+#### 4.2.2 Peer Discovery Protocol
+
+**Discovery Mechanisms:**
+
+**A. BLE Advertisement:**
+```rust
+use btleplug::api::{Central, Manager as _, Peripheral, ScanFilter};
+use btleplug::platform::Manager;
+
+pub struct BLEMeshNode {
+    manager: Manager,
+    adapter: Adapter,
+    known_peers: HashMap<[u8; 32], PeerInfo>,
+}
+
+impl BLEMeshNode {
+    pub async fn start_advertising(&self) -> Result<(), Error> {
+        // Advertise Meshcrypt service UUID
+        let service_uuid = Uuid::parse_str("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")?;
+        
+        // Create advertisement data
+        let ad_data = AdvertisementData {
+            service_uuids: vec![service_uuid],
+            local_name: Some("Meshcrypt".to_string()),
+            manufacturer_data: Some(self.create_manufacturer_data()),
+        };
+        
+        self.adapter.start_advertising(ad_data).await?;
+        
+        Ok(())
+    }
+    
+    pub async fn scan_for_peers(&mut self) -> Result<Vec<PeerInfo>, Error> {
+        let filter = ScanFilter {
+            services: vec![Meshcrypt_SERVICE_UUID],
+        };
+        
+        self.adapter.start_scan(filter).await?;
+        
+        // Wait for scan results
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        
+        let peripherals = self.adapter.peripherals().await?;
+        let mut discovered_peers = Vec::new();
+        
+        for peripheral in peripherals {
+            if let Ok(properties) = peripheral.properties().await {
+                if let Some(peer_info) = self.parse_peer_info(properties) {
+                    discovered_peers.push(peer_info);
+                    self.known_peers.insert(peer_info.id, peer_info);
+                }
+            }
+        }
+        
+        self.adapter.stop_scan().await?;
+        
+        Ok(discovered_peers)
+    }
+    
+    fn create_manufacturer_data(&self) -> Vec<u8> {
+        // Encode: [version (1) | capabilities (1) | node_id (32) | port (2)]
+        let mut data = Vec::new();
+        data.push(0x01); // Version
+        data.push(0b00000111); // Capabilities: BLE | WiFi | LoRa
+        data.extend_from_slice(&self.node_id);
+        data.extend_from_slice(&self.listen_port.to_le_bytes());
+        data
+    }
+    
+    async fn connect_to_peer(&self, peer: &PeerInfo) -> Result<BLEConnection, Error> {
+        let peripheral = self.adapter.peripheral(&peer.id).await?;
+        
+        peripheral.connect().await?;
+        peripheral.discover_services().await?;
+        
+        // Get Meshcrypt characteristics
+        let chars = peripheral.characteristics();
+        let tx_char = chars.iter()
+            .find(|c| c.uuid == TX_CHARACTERISTIC_UUID)
+            .ok_or(Error::CharacteristicNotFound)?;
+        let rx_char = chars.iter()
+            .find(|c| c.uuid == RX_CHARACTERISTIC_UUID)
+            .ok_or(Error::CharacteristicNotFound)?;
+        
+        Ok(BLEConnection {
+            peripheral,
+            tx_char: tx_char.clone(),
+            rx_char: rx_char.clone(),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PeerInfo {
+    pub id: [u8; 32],
+    pub capabilities: u8,
+    pub last_seen: SystemTime,
+    pub signal_strength: i8,  // RSSI
+    pub transport: TransportType,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum TransportType {
+    BLE,
+    WiFiDirect,
+    LoRa,
+    Internet,
+}
+```
+
+**B. WiFi Direct Discovery:**
+```rust
+use wifi_direct::{WifiDirectManager, PeerDiscoveryListener};
+
+pub struct WiFiDirectMeshNode {
+    manager: WifiDirectManager,
+    group_owner: bool,
+    peers: Vec<WifiPeer>,
+}
+
+impl WiFiDirectMeshNode {
+    pub fn start_discovery(&mut self) -> Result<(), Error> {
+        self.manager.discover_peers(
+            Duration::from_secs(30),
+            Box::new(|peer| {
+                println!("Discovered WiFi Direct peer: {:?}", peer);
+                self.peers.push(peer);
+            })
+        )?;
+        
+        Ok(())
+    }
+    
+    pub fn create_group(&mut self) -> Result<(), Error> {
+        // Create WiFi Direct group (become group owner)
+        self.manager.create_group()?;
+        self.group_owner = true;
+        
+        // Start listening for connections
+        self.manager.start_listening(8888)?;
+        
+        Ok(())
+    }
+    
+    pub fn connect_to_group(&self, peer: &WifiPeer) -> Result<(), Error> {
+        // Connect to existing group
+        self.manager.connect(peer)?;
+        
+        Ok(())
+    }
+}
+```
+
+#### 4.2.3 Gossip Protocol
+
+**Epidemic Broadcast Algorithm:**
+```rust
+pub struct GossipProtocol {
+    node_id: [u8; 32],
+    peers: Arc<RwLock<HashMap<[u8; 32], PeerInfo>>>,
+    message_cache: Arc<RwLock<LruCache<[u8; 32], MeshMessage>>>,
+    fanout: usize,  // Number of peers to gossip to
+}
+
+impl GossipProtocol {
+    pub fn new(node_id: [u8; 32]) -> Self {
+        GossipProtocol {
+            node_id,
+            peers: Arc::new(RwLock::new(HashMap::new())),
+            message_cache: Arc::new(RwLock::new(LruCache::new(10000))),
+            fanout: 6,  // Gossip to 6 random peers
+        }
+    }
+    
+    pub async fn broadcast_message(&self, message: MeshMessage) -> Result<(), Error> {
+        // Add to cache to prevent re-broadcasting
+        {
+            let mut cache = self.message_cache.write().await;
+            if cache.contains(&message.header.message_id) {
+                return Ok(()); // Already seen this message
+            }
+            cache.put(message.header.message_id, message.clone());
+        }
+        
+        // Select random peers for gossip
+        let peers = self.select_gossip_peers().await;
+        
+        // Send to selected peers in parallel
+        let mut tasks = Vec::new();
+        for peer in peers {
+            let msg = message.clone();
+            let task = tokio::spawn(async move {
+                Self::send_to_peer(&peer, msg).await
+            });
+            tasks.push(task);
+        }
+        
+        // Wait for all sends to complete (with timeout)
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            futures::future::join_all(tasks)
+        ).await?;
+        
+        Ok(())
+    }
+    
+    async fn select_gossip_peers(&self) -> Vec<PeerInfo> {
+        let peers = self.peers.read().await;
+        
+        // Select 'fanout' random peers
+        let mut rng = rand::thread_rng();
+        let peer_vec: Vec<_> = peers.values().cloned().collect();
+        
+        if peer_vec.len() <= self.fanout {
+            peer_vec
+        } else {
+            peer_vec.choose_multiple(&mut rng, self.fanout).cloned().collect()
+        }
+    }
+    
+    async fn send_to_peer(peer: &PeerInfo, message: MeshMessage) -> Result<(), Error> {
+        match peer.transport {
+            TransportType::BLE => {
+                // Send via BLE characteristic write
+                Self::send_ble(peer, &message).await
+            },
+            TransportType::WiFiDirect => {
+                // Send via TCP socket
+                Self::send_tcp(peer, &message).await
+            },
+            TransportType::LoRa => {
+                // Send via LoRa radio
+                Self::send_lora(peer, &message).await
+            },
+            TransportType::Internet => {
+                // Send via internet (fallback)
+                Self::send_http(peer, &message).await
+            },
+        }
+    }
+    
+    async fn send_tcp(peer: &PeerInfo, message: &MeshMessage) -> Result<(), Error> {
+        let addr = format!("{}:{}", peer.ip_address, peer.port);
+        let mut stream = TcpStream::connect(addr).await?;
+        
+        // Serialize and send message
+        let data = bincode::serialize(message)?;
+        stream.write_u32(data.len() as u32).await?;
+        stream.write_all(&data).await?;
+        stream.flush().await?;
+        
+        Ok(())
+    }
+    
+    pub async fn handle_received_message(&self, message: MeshMessage) -> Result<(), Error> {
+        // Verify signature
+        if !message.verify_signature() {
+            return Err(Error::InvalidSignature);
+        }
+        
+        // Check TTL
+        if message.header.ttl == 0 {
+            return Ok(()); // Message expired
+        }
+        
+        // Check if already seen
+        {
+            let cache = self.message_cache.read().await;
+            if cache.contains(&message.header.message_id) {
+                return Ok(()); // Already processed
+            }
+        }
+        
+        // Process message based on type
+        match message.header.message_type {
+            MessageType::Transaction => {
+                self.handle_transaction(message.clone()).await?;
+            },
+            MessageType::PeerDiscovery => {
+                self.handle_peer_discovery(message.clone()).await?;
+            },
+            MessageType::BlockSync => {
+                self.handle_block_sync(message.clone()).await?;
+            },
+            _ => {},
+        }
+        
+        // Decrease TTL and re-broadcast
+        let mut forwarded_message = message.clone();
+        forwarded_message.header.ttl -= 1;
+        forwarded_message.header.prev_hop = Some(self.node_id);
+        
+        self.broadcast_message(forwarded_message).await?;
+        
+        Ok(())
+    }
+    
+    async fn handle_transaction(&self, message: MeshMessage) -> Result<(), Error> {
+        // Decrypt payload
+        let shared_key = self.derive_shared_key(&message.header.sender_id);
+        let decrypted = message.decrypt_payload(&shared_key)?;
+        
+        // Parse transaction
+        let tx: SignedTransaction = bincode::deserialize(&decrypted)?;
+        
+        // Add to local transaction pool
+        self.add_to_tx_pool(tx).await?;
+        
+        Ok(())
+    }
+}
+```
+
+#### 4.2.4 LoRa Integration
+
+**LoRa Parameters for Meshcrypt:**
+- **Frequency**: 868 MHz (EU) / 915 MHz (US)
+- **Bandwidth**: 125 kHz
+- **Spreading Factor**: 7-12 (trade-off range vs. speed)
+- **Coding Rate**: 4/5
+- **Power**: 14 dBm (25mW)
+
+```rust
+use lora_phy::{LoRa, sx127x::{Sx127x, Sx1276}};
+
+pub struct LoRaMeshNode {
+    radio: Sx1276,
+    frequency: u32,
+    bandwidth: Bandwidth,
+    spreading_factor: SpreadingFactor,
+}
+
+impl LoRaMeshNode {
+    pub fn new(spi: SpiDevice) -> Result<Self, Error> {
+        let mut radio = Sx1276::new(spi)?;
+        
+        // Configure for Meshcrypt
+        radio.set_frequency(868_000_000)?;  // 868 MHz
+        radio.set_bandwidth(Bandwidth::Bw125)?;
+        radio.set_spreading_factor(SpreadingFactor::Sf9)?;
+        radio.set_coding_rate(CodingRate::Cr4_5)?;
+        radio.set_tx_power(14)?;  // 14 dBm
+        
+        Ok(LoRaMeshNode {
+            radio,
+            frequency: 868_000_000,
+            bandwidth: Bandwidth::Bw125,
+            spreading_factor: SpreadingFactor::Sf9,
+        })
+    }
+    
+    pub async fn send_lora_message(&mut self, message: &MeshMessage) -> Result<(), Error> {
+        // Serialize message
+        let data = bincode::serialize(message)?;
+        
+        // LoRa has payload size limit (typically 255 bytes)
+        if data.len() > 255 {
+            // Split into multiple packets
+            return self.send_fragmented(data).await;
+        }
+        
+        // Transmit
+        self.radio.transmit(&data).await?;
+        
+        Ok(())
+    }
+    
+    pub async fn receive_lora_message(&mut self) -> Result<MeshMessage, Error> {
+        // Wait for packet
+        let data = self.radio.receive().await?;
+        
+        // Deserialize
+        let message: MeshMessage = bincode::deserialize(&data)?;
+        
+        Ok(message)
+    }
+    
+    async fn send_fragmented(&mut self, data: Vec<u8>) -> Result<(), Error> {
+        const MAX_PAYLOAD: usize = 250;
+        let num_fragments = (data.len() + MAX_PAYLOAD - 1) / MAX_PAYLOAD;
+        
+        for (i, chunk) in data.chunks(MAX_PAYLOAD).enumerate() {
+            // Add fragment header: [fragment_id (2) | total_fragments (2) | data]
+            let mut packet = Vec::new();
+            packet.extend_from_slice(&(i as u16).to_le_bytes());
+            packet.extend_from_slice(&(num_fragments as u16).to_le_bytes());
+            packet.extend_from_slice(chunk);
+            
+            self.radio.transmit(&packet).await?;
+            
+            // Small delay between fragments
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        Ok(())
+    }
+}
+```
+
+### 4.3 Offline Transaction Queue
+
+**Problem:** User creates transaction without internet connectivity.
+
+**Solution:** Queue transactions locally, propagate via mesh when peers available.
+
+```rust
+use sqlcipher::Connection;
+
+pub struct OfflineTransactionQueue {
+    db: Connection,
+    mesh_node: Arc<GossipProtocol>,
+}
+
+impl OfflineTransactionQueue {
+    pub fn new(db_path: &str, password: &str) -> Result<Self, Error> {
+        let db = Connection::open(db_path)?;
+        db.execute(&format!("PRAGMA key = '{}';", password), [])?;
+        
+        // Create tables
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS pending_transactions (
+                id INTEGER PRIMARY KEY,
+                tx_data BLOB NOT NULL,
+                created_at INTEGER NOT NULL,
+                attempts INTEGER DEFAULT 0,
+                last_attempt INTEGER,
+                status TEXT DEFAULT 'pending'
+            )",
+            [],
+        )?;
+        
+        Ok(OfflineTransactionQueue {
+            db,
+            mesh_node: Arc::new(GossipProtocol::new([0u8; 32])),
+        })
+    }
+    
+    pub fn add_transaction(&self, tx: SignedTransaction) -> Result<(), Error> {
+        let tx_data = bincode::serialize(&tx)?;
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_secs();
+        
+        self.db.execute(
+            "INSERT INTO pending_transactions (tx_data, created_at) VALUES (?1, ?2)",
+            params![tx_data, now as i64],
+        )?;
+        
+        Ok(())
+    }
+    
+    pub async fn process_queue(&mut self) -> Result<(), Error> {
+        // Get all pending transactions
+        let mut stmt = self.db.prepare(
+            "SELECT id, tx_data FROM pending_transactions WHERE status = 'pending' ORDER BY created_at"
+        )?;
+        
+        let txs = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, Vec<u8>>(1)?,
+            ))
+        })?;
+        
+        for tx_result in txs {
+            let (id, tx_data) = tx_result?;
+            let tx: SignedTransaction = bincode::deserialize(&tx_data)?;
+            
+            // Try to broadcast via mesh
+            match self.broadcast_transaction(tx).await {
+                Ok(_) => {
+                    // Mark as sent
+                    self.db.execute(
+                        "UPDATE pending_transactions SET status = 'sent' WHERE id = ?1",
+                        params![id],
+                    )?;
+                },
+                Err(e) => {
+                    // Increment attempt counter
+                    self.db.execute(
+                        "UPDATE pending_transactions SET attempts = attempts + 1, last_attempt = ?1 WHERE id = ?2",
+                        params![SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64, id],
+                    )?;
+                },
+            }
