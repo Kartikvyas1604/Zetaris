@@ -1,5 +1,5 @@
 /**
- * CipherMesh Wallet SDK
+ * Meshcrypt Wallet SDK
  * 
  * Complete developer SDK for integrating privacy-preserving
  * cryptocurrency functionality into applications.
@@ -12,7 +12,7 @@
  * - NFC payments
  * - Analytics queries
  * 
- * Based on CipherMesh specification Layer 7
+ * Based on Meshcrypt specification Layer 7
  */
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
@@ -82,12 +82,12 @@ export interface WalletInfo {
 }
 
 /**
- * CipherMesh SDK
+ * Meshcrypt SDK
  * 
  * Main entry point for developers to integrate privacy-preserving
  * wallet functionality
  */
-export class CipherMeshSDK {
+export class MeshcryptSDK {
   private wallet: Wallet;
   private bridge?: CrossChainBridge;
   private analytics?: PrivacyAnalyticsEngine;
@@ -112,7 +112,7 @@ export class CipherMeshSDK {
       targetChain: Chain.Polygon,
       privacyMode: 'shielded',
       minConfirmations: 12,
-      relayerEndpoint: 'https://relayer.ciphermesh.io',
+      relayerEndpoint: 'https://relayer.Meshcrypt.io',
     });
 
     // Privacy analytics
@@ -445,7 +445,7 @@ export class CipherMeshSDK {
 /**
  * Create SDK instance with default configuration
  */
-export function createCipherMeshSDK(config?: Partial<SDKConfig>): CipherMeshSDK {
+export function createMeshcryptSDK(config?: Partial<SDKConfig>): MeshcryptSDK {
   const defaultConfig: SDKConfig = {
     network: 'mainnet',
     enableMeshNetwork: true,
@@ -454,14 +454,14 @@ export function createCipherMeshSDK(config?: Partial<SDKConfig>): CipherMeshSDK 
     privacyLevel: 'high',
   };
 
-  return new CipherMeshSDK({ ...defaultConfig, ...config });
+  return new MeshcryptSDK({ ...defaultConfig, ...config });
 }
 
 /**
  * Create SDK instance for testing
  */
-export function createTestnetSDK(): CipherMeshSDK {
-  return createCipherMeshSDK({
+export function createTestnetSDK(): MeshcryptSDK {
+  return createMeshcryptSDK({
     network: 'testnet',
     privacyLevel: 'medium',
   });

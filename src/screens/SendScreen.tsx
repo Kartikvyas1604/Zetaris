@@ -23,8 +23,8 @@ import {
   ActivityIndicator,
   Modal,
   Animated,
+  StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Asset {
   symbol: string;
@@ -243,15 +243,16 @@ export default function SendScreen({ navigation }: SendScreenProps) {
 
   if (!selectedAsset) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <ActivityIndicator size="large" color="#A855F7" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#0a0a0a" />
+      <ScrollView >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -552,7 +553,7 @@ export default function SendScreen({ navigation }: SendScreenProps) {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

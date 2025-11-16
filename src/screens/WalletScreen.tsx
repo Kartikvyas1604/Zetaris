@@ -22,7 +22,6 @@ import {
   ActivityIndicator,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -299,19 +298,19 @@ export default function WalletScreen() {
 
   if (loading && assets.length === 0) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#A855F7" />
           <Text style={styles.loadingText}>Loading wallet...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <ScrollView
-        showsVerticalScrollIndicator={false}
+        
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -442,7 +441,7 @@ export default function WalletScreen() {
           </View>
         </Animated.View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

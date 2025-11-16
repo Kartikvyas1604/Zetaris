@@ -26,7 +26,6 @@ import {
   Modal,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Token {
   symbol: string;
@@ -289,17 +288,17 @@ export default function SwapScreen({ navigation }: { navigation: any }) {
 
   if (!fromToken || !toToken) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
         <ActivityIndicator size="large" color="#A855F7" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   const isCrossChain = fromToken.chain !== toToken.chain;
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      <ScrollView >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -596,7 +595,7 @@ export default function SwapScreen({ navigation }: { navigation: any }) {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 

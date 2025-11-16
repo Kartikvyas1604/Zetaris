@@ -25,7 +25,6 @@ import {
   Animated,
   TextInput,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface ChainAddress {
   chain: string;
@@ -197,12 +196,12 @@ export default function ReceiveScreen({ navigation }: { navigation: any }) {
   );
 
   if (!selectedChain) {
-    return <SafeAreaView style={styles.container} />;
+    return <View style={styles.container} />;
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      <ScrollView >
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
@@ -387,7 +386,7 @@ export default function ReceiveScreen({ navigation }: { navigation: any }) {
           </View>
         </Animated.View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
