@@ -3,7 +3,7 @@
  * Monitors bridge events and triggers relay operations
  */
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from '../utils/EventEmitter';
 import BridgeService, { BridgeNetwork, BridgeTransfer } from './BridgeService';
 import zkProofService from '../privacy/zkProofService';
 

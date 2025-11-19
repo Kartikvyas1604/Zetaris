@@ -3,8 +3,8 @@
  * Represents a peer node in the decentralized mesh network
  */
 
-import { EventEmitter } from 'events';
-import { randomBytes } from 'crypto';
+import { EventEmitter } from '../utils/EventEmitter';
+import { randomBytes } from '@noble/hashes/utils';
 
 export interface PeerInfo {
   id: string;
@@ -317,18 +317,28 @@ export class MeshPeer extends EventEmitter {
    * Generate peer ID from public key
    */
   private generatePeerId(publicKey: string): string {
-    const hash = require('crypto')
-      .createHash('sha256')
-      .update(publicKey)
-      .digest('hex');
-    return hash.substring(0, 40);
+    // Simple hash of public key for peer ID
+    return publicKey.slice(0, 16);
+  }
+
+  /**
+   * Generate unique ID
+   */
+  private generateId(): string {
+    const bytes = randomBytes(16);
+    return Array.from(bytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 
   /**
    * Generate unique message ID
    */
   private generateMessageId(): string {
-    return randomBytes(16).toString('hex');
+    const bytes = randomBytes(16);
+    return Array.from(bytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
   }
 }
 

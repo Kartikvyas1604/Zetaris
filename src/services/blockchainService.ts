@@ -53,6 +53,10 @@ export class BlockchainService {
    */
   public async getEthereumBalance(address: string): Promise<ChainBalance> {
     try {
+      if (!address || address === 'null' || address === 'undefined') {
+        return this.getEmptyBalance('Ethereum', 'ETH');
+      }
+
       const provider = new ethers.JsonRpcProvider(this.ETHEREUM_RPC);
       const balance = await provider.getBalance(address);
       const ethBalance = ethers.formatEther(balance);
@@ -67,13 +71,7 @@ export class BlockchainService {
       };
     } catch (error) {
       logger.error('Error fetching Ethereum balance:', error);
-      return {
-        chain: 'Ethereum',
-        address,
-        balance: '0.000000',
-        balanceUSD: 0,
-        symbol: 'ETH',
-      };
+      return this.getEmptyBalance('Ethereum', 'ETH', address);
     }
   }
 
@@ -82,6 +80,10 @@ export class BlockchainService {
    */
   public async getPolygonBalance(address: string): Promise<ChainBalance> {
     try {
+      if (!address || address === 'null' || address === 'undefined') {
+        return this.getEmptyBalance('Polygon', 'MATIC');
+      }
+
       const provider = new ethers.JsonRpcProvider(this.POLYGON_RPC);
       const balance = await provider.getBalance(address);
       const maticBalance = ethers.formatEther(balance);
@@ -96,9 +98,9 @@ export class BlockchainService {
       };
     } catch (error) {
       logger.error('Error fetching Polygon balance:', error);
-      return {
-        chain: 'Polygon',
-        address,
+      return this.getEmptyBalance('Polygon', 'MATIC', address);
+    }
+  }
         balance: '0.000000',
         balanceUSD: 0,
         symbol: 'MATIC',
@@ -111,6 +113,10 @@ export class BlockchainService {
    */
   public async getSolanaBalance(address: string): Promise<ChainBalance> {
     try {
+      if (!address || address === 'null' || address === 'undefined') {
+        return this.getEmptyBalance('Solana', 'SOL');
+      }
+
       const connection = new Connection(this.SOLANA_RPC, 'confirmed');
       const publicKey = new PublicKey(address);
       const balance = await connection.getBalance(publicKey);
@@ -126,13 +132,7 @@ export class BlockchainService {
       };
     } catch (error) {
       logger.error('Error fetching Solana balance:', error);
-      return {
-        chain: 'Solana',
-        address,
-        balance: '0.000000',
-        balanceUSD: 0,
-        symbol: 'SOL',
-      };
+      return this.getEmptyBalance('Solana', 'SOL', address);
     }
   }
 
@@ -141,20 +141,17 @@ export class BlockchainService {
    */
   public async getZcashBalance(address: string): Promise<ChainBalance> {
     try {
+      if (!address || address === 'null' || address === 'undefined') {
+        return this.getEmptyBalance('Zcash', 'ZEC');
+      }
+
       // Check if shielded or transparent address
       const isShielded = address.startsWith('z');
       
       if (isShielded) {
         // For shielded addresses, we need a light client
-        // For now, return 0 with note
         logger.info('Zcash shielded balance requires light client sync');
-        return {
-          chain: 'Zcash',
-          address,
-          balance: '0.000000',
-          balanceUSD: 0,
-          symbol: 'ZEC',
-        };
+        return this.getEmptyBalance('Zcash', 'ZEC', address);
       } else {
         // Transparent address - query blockchain API
         const response = await axios.get(`${this.ZCASH_API}/accounts/${address}`);
@@ -172,13 +169,7 @@ export class BlockchainService {
       }
     } catch (error) {
       logger.error('Error fetching Zcash balance:', error);
-      return {
-        chain: 'Zcash',
-        address,
-        balance: '0.000000',
-        balanceUSD: 0,
-        symbol: 'ZEC',
-      };
+      return this.getEmptyBalance('Zcash', 'ZEC', address);
     }
   }
 
@@ -187,6 +178,10 @@ export class BlockchainService {
    */
   public async getBitcoinBalance(address: string): Promise<ChainBalance> {
     try {
+      if (!address || address === 'null' || address === 'undefined') {
+        return this.getEmptyBalance('Bitcoin', 'BTC');
+      }
+
       const response = await axios.get(`${this.BITCOIN_API}/address/${address}`);
       const satoshis = response.data.chain_stats.funded_txo_sum - response.data.chain_stats.spent_txo_sum;
       const btcBalance = satoshis / 100000000; // Convert satoshis to BTC
@@ -196,6 +191,27 @@ export class BlockchainService {
         chain: 'Bitcoin',
         address,
         balance: btcBalance.toFixed(8),
+        balanceUSD: btcBalance * priceUSD,
+        symbol: 'BTC',
+      };
+    } catch (error) {
+      logger.error('Error fetching Bitcoin balance:', error);
+      return this.getEmptyBalance('Bitcoin', 'BTC', address);
+    }
+  }
+
+  /**
+   * Helper method to return empty balance
+   */
+  private getEmptyBalance(chain: string, symbol: string, address: string = ''): ChainBalance {
+    return {
+      chain,
+      address,
+      balance: '0.000000',
+      balanceUSD: 0,
+      symbol,
+    };
+  }
         balanceUSD: btcBalance * priceUSD,
         symbol: 'BTC',
       };

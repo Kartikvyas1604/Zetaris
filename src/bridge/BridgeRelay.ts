@@ -4,7 +4,7 @@
  */
 
 import { ethers } from 'ethers';
-import { EventEmitter } from 'events';
+import { EventEmitter } from '../utils/EventEmitter';
 import { BridgeNetwork, BridgeTransfer } from './BridgeService';
 
 export interface RelayMessage {

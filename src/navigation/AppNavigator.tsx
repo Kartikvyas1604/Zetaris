@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import CipherMeshWallet from '../screens/ZetarisWallet';
 import EnhancedWalletScreen from '../screens/EnhancedWalletScreen';
 import RealSendScreen from '../screens/RealSendScreen';
 import RealReceiveScreen from '../screens/RealReceiveScreen';
@@ -27,6 +28,10 @@ export type RootStackParamList = {
   ImportWallet: undefined;
   ImportPrivateKey: undefined;
   Wallet: undefined;
+  RealSend: undefined;
+  RealReceive: undefined;
+  SwapScreen: undefined;
+  NFCPay: undefined;
   Send: undefined;
   Receive: undefined;
   Swap: undefined;
@@ -73,7 +78,10 @@ export default function AppNavigator() {
       <Stack.Screen name="ImportPrivateKey" component={ImportPrivateKeyScreen} />
       
       {/* Main Wallet Screens */}
-      <Stack.Screen name="Wallet" component={EnhancedWalletScreen} />
+      <Stack.Screen name="Wallet" component={CipherMeshWallet} />
+      <Stack.Screen name="RealSend" component={RealSendScreen} />
+      <Stack.Screen name="RealReceive" component={RealReceiveScreen} />
+      <Stack.Screen name="SwapScreen" component={SwapScreen} />
       <Stack.Screen name="Send" component={RealSendScreen} />
       <Stack.Screen name="Receive" component={RealReceiveScreen} />
       <Stack.Screen name="Swap" component={SwapScreen} />

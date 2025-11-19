@@ -17,6 +17,7 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "@chainlink/contracts": "^1.5.0",
     "@expo/vector-icons": "^15.0.3",
     "@noble/curves": "^1.9.7",
     "@noble/ed25519": "^3.0.0",

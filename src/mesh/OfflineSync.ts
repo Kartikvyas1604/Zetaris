@@ -3,7 +3,7 @@
  * Manages offline transaction queue and synchronization
  */
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from '../utils/EventEmitter';
 
 export interface OfflineTransaction {
   id: string;

@@ -3,7 +3,7 @@
  * Handles message routing and discovery in the mesh network
  */
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from '../utils/EventEmitter';
 
 export interface Route {
   destination: string;
