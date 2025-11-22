@@ -523,6 +523,8 @@ export class CrossChainBridge {
     tokenAddress: string;
     amount: string;
     recipient: string;
+    senderAddress: string;
+    privateKey: string;
   }): Promise<string> {
     logger.info('Initiating cross-chain transfer', params);
     
@@ -532,11 +534,10 @@ export class CrossChainBridge {
       targetChain: params.targetChain,
       tokenAddress: params.tokenAddress,
       amount: params.amount,
-      sender: params.recipient, // TODO: Get actual sender
+      sender: params.senderAddress,
       recipient: params.recipient
     };
-    const privateKey = '0x0000000000000000000000000000000000000000000000000000000000000000'; // TODO: Get from wallet
-    const lockEvent = await this.lockAssets(asset, privateKey);
+    const lockEvent = await this.lockAssets(asset, params.privateKey);
     return lockEvent.lockId;
   }
 

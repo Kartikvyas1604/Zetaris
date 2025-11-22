@@ -164,8 +164,11 @@ export class TokenService {
       const balance = await tokenContract.balanceOf(walletAddress);
       const balanceFormatted = ethers.formatUnits(balance, tokenInfo.decimals);
       
-      // Get USD price (simplified - use CoinGecko in production)
-      const balanceUSD = 0; // TODO: Integrate price oracle
+      // Get USD price from oracle
+      const balanceUSD = await priceOracle.calculateUSDValue(
+        tokenInfo.symbol,
+        balanceFormatted
+      );
       
       const tokenBalance: TokenBalance = {
         tokenAddress,
