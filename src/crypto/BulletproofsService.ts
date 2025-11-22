@@ -4,22 +4,12 @@ import { sha256 } from '@noble/hashes/sha256';
 import { randomBytes } from '@noble/hashes/utils';
 import { secp256k1 } from '@noble/curves/secp256k1';
 
-/**
- * Range Proof
- * 
- * Proves that a committed value lies in range [0, 2^n) without revealing the value
- */
 export interface RangeProof {
   commitment: Uint8Array;
   proof: Uint8Array;
   range: number; // n in [0, 2^n)
 }
 
-/**
- * Confidential Amount
- * 
- * Hides transaction amount while allowing verification
- */
 export interface ConfidentialAmount {
   commitment: Uint8Array; // Pedersen commitment
   rangeProof: RangeProof;
@@ -37,26 +27,6 @@ export interface AggregateProof {
   ranges: number[];
 }
 
-/**
- * Bulletproofs Service
- * 
- * Implements Bulletproofs protocol for:
- * 1. **Range Proofs**: Prove amount in [0, 2^64) without revealing
- * 2. **Confidential Transactions**: Hide transfer amounts
- * 3. **Aggregate Proofs**: Batch multiple proofs efficiently
- * 4. **Non-interactive**: Zero round trips, constant size
- * 
- * Use cases:
- * - Private balance hiding
- * - Confidential transfers
- * - Compliance (prove balance > threshold)
- * - Audit trails without disclosure
- * 
- * Security:
- * - Perfect hiding (information-theoretic)
- * - Computational binding (discrete log assumption)
- * - Sublinear proof size: O(log n)
- */
 export class BulletproofsService {
   // Curve generator points
   private readonly G: Uint8Array;

@@ -2,9 +2,7 @@ import { EventEmitter } from '../utils/EventEmitter';
 import * as logger from '../utils/logger';
 import { FusionPlusClient, AuctionStatus } from './FusionPlusClient';
 
-/**
- * Auction States
- */
+
 export enum AuctionState {
   PENDING = 'pending',
   ANNOUNCED = 'announced',
